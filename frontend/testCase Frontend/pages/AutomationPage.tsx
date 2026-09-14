@@ -620,7 +620,7 @@ export function AutomationPage() {
               }`}
             >
               <Folder className="h-4 w-4" />
-              Modular POM Project
+              Modular Page Object Model Project
               {generation.project_structure && (
                 <span className={`ml-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
                   activeGenTab === 'modular' ? 'bg-primary-foreground/20 text-primary-foreground' : 'bg-muted text-muted-foreground'
@@ -658,7 +658,7 @@ export function AutomationPage() {
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {generation.project_structure.files.length} modular POM files
+                    {generation.project_structure.files.length} modular Page Object Model files
                   </p>
                 </div>
                 <div className="space-y-1 overflow-y-auto p-2">
@@ -941,7 +941,7 @@ function Detail({ label, value }: { label: string; value?: string }) {
 function DeveloperReportCard({ report }: { report: DeveloperExecutionReport }) {
   const failure = report.technical_failure_details;
   const requirements = [
-    ...report.developer_implementation_requirements.ui.map((value) => `UI: ${value}`),
+    ...report.developer_implementation_requirements.ui.map((value) => `User Interface: ${value}`),
     ...report.developer_implementation_requirements.backend_api.map((value) => `Backend/API: ${value}`),
     ...report.developer_implementation_requirements.validation.map((value) => `Validation: ${value}`),
     ...report.developer_implementation_requirements.database.map((value) => `Database: ${value}`),
@@ -973,7 +973,7 @@ function DeveloperReportCard({ report }: { report: DeveloperExecutionReport }) {
     {failure && <ReportSection title="Execution Evidence"><TextList values={[
       failure.screenshot ? `Screenshot: ${failure.screenshot}` : '',
       failure.trace_path ? `Trace: ${failure.trace_path}` : '',
-      failure.dom_snapshot ? `DOM snapshot: ${failure.dom_snapshot}` : '',
+      failure.dom_snapshot ? `Document Object Model snapshot: ${failure.dom_snapshot}` : '',
       ...failure.console_logs.map((value) => `Console: ${value}`),
       ...failure.network_errors.map((value) => `Network: ${value}`),
     ].filter(Boolean)} empty="No execution evidence was captured." /></ReportSection>}
@@ -1012,7 +1012,7 @@ function QaDiagnosticCard({ report }: { report: QaDiagnosticReport }) {
   const evidence = [
     report.locator ? `Locator: ${report.locator}` : '',
     report.playwright_trace ? `Trace: ${report.playwright_trace}` : '',
-    report.dom_snapshot ? `DOM: ${report.dom_snapshot}` : '',
+    report.dom_snapshot ? `Document Object Model snapshot: ${report.dom_snapshot}` : '',
     ...report.screenshots.map((value) => `Screenshot: ${value}`),
     ...report.network_errors.map((value) => `Network: ${value}`),
     ...report.console_logs.map((value) => `Console: ${value}`),
@@ -1097,7 +1097,7 @@ function TraceabilityComparisonSection({ comparison }: { comparison: Traceabilit
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-primary">Post-execution traceability</p>
           <h2 className="mt-1 text-xl font-bold">Coverage &amp; Gap Analysis</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            DOM UI evidence comparison against test scenarios and test cases.
+            Document Object Model and User Interface evidence comparison against test scenarios and test cases.
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
             Covered &gt; {comparison.summary.thresholds?.covered_above ?? 60}% · Partially Covered {comparison.summary.thresholds?.missing_below ?? 20}–{comparison.summary.thresholds?.covered_above ?? 60}% · Missing Evidence &lt; {comparison.summary.thresholds?.missing_below ?? 20}%
@@ -1194,7 +1194,7 @@ function TraceabilityComparisonSection({ comparison }: { comparison: Traceabilit
             const title = item.artifact_title || item.title || 'Untitled Artifact';
             const status = getStatus(item);
             const coveragePct = item.coverage_percentage ?? (status === 'covered' ? 100 : 0);
-            const details = item.details || (item.missing_terms?.length ? `Missing UI evidence: ${item.missing_terms.join(', ')}` : 'All UI evidence verified');
+            const details = item.details || (item.missing_terms?.length ? `Missing User Interface evidence: ${item.missing_terms.join(', ')}` : 'All User Interface evidence verified');
             const isTestCase = comparison.test_case_coverage.some((artifact) => artifact.id === id);
 
             return (

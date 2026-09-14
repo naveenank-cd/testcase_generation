@@ -1,7 +1,16 @@
 'use client';
 
 import { create } from 'zustand';
-import type { CrawlAnalysis, ExecutionReport, ScriptGeneration, TraceabilityComparisonReport, WorkflowEvent, WorkflowResult } from '../types';
+import type {
+  ApplicationFlow,
+  ApplicationKnowledge,
+  CrawlAnalysis,
+  ExecutionReport,
+  ScriptGeneration,
+  TraceabilityComparisonReport,
+  WorkflowEvent,
+  WorkflowResult,
+} from '../types';
 import { WORKFLOW_SNAPSHOT_KEY, WORKFLOW_STORAGE_KEY } from '../constants';
 
 import { setActiveProjectId } from '../utils';
@@ -11,10 +20,13 @@ interface WorkflowStore {
   projectId: string | null;
   snapshot: WorkflowEvent | null;
   result: WorkflowResult | null;
+  knowledge: ApplicationKnowledge | null;
+  flow: ApplicationFlow | null;
   projects: TestProjectRecord[];
   setWorkflow: (workflowId: string, projectId?: string | null, projectName?: string) => void;
   setSnapshot: (snapshot: WorkflowEvent) => void;
   setResult: (result: WorkflowResult | null) => void;
+  setKnowledgeAndFlow: (knowledge: ApplicationKnowledge | null, flow: ApplicationFlow | null) => void;
   deleteProject: (workflowId: string) => void;
   renameProject: (workflowId: string, newName: string) => void;
   hydrate: () => void;
@@ -55,6 +67,8 @@ export function loadActiveProjectName(): string {
 export interface SavedTestProjectArtifacts {
   generation?: ScriptGeneration;
   crawl?: CrawlAnalysis;
+  knowledge?: ApplicationKnowledge;
+  flow?: ApplicationFlow;
   report?: ExecutionReport;
   comparison?: TraceabilityComparisonReport;
   applicationUrl?: string;
@@ -70,7 +84,15 @@ export function loadTestProjectArtifacts(workflowId: string): SavedTestProjectAr
   } catch { return null; }
 }
 
-export function saveTestProjectArtifacts(workflowId: string, generation?: ScriptGeneration | null, report?: ExecutionReport | null, comparison?: TraceabilityComparisonReport | null, crawl?: CrawlAnalysis | null) {
+export function saveTestProjectArtifacts(
+  workflowId: string,
+  generation?: ScriptGeneration | null,
+  report?: ExecutionReport | null,
+  comparison?: TraceabilityComparisonReport | null,
+  crawl?: CrawlAnalysis | null,
+  knowledge?: ApplicationKnowledge | null,
+  flow?: ApplicationFlow | null,
+) {
   const projects = readProjects();
   const index = projects.findIndex((item) => item.workflowId === workflowId);
   if (index < 0) return;
@@ -82,11 +104,23 @@ export function saveTestProjectArtifacts(workflowId: string, generation?: Script
   saveProjects(projects);
   try {
     const saved = loadTestProjectArtifacts(workflowId) ?? {};
-    localStorage.setItem(artifactsKey(workflowId), JSON.stringify({ ...saved, generation: generation ?? saved.generation, report: report ?? saved.report, comparison: comparison ?? saved.comparison, crawl: crawl ?? saved.crawl }));
+    localStorage.setItem(
+      artifactsKey(workflowId),
+      JSON.stringify({
+        ...saved,
+        generation: generation ?? saved.generation,
+        report: report ?? saved.report,
+        comparison: comparison ?? saved.comparison,
+        crawl: crawl ?? saved.crawl,
+        knowledge: knowledge ?? saved.knowledge,
+        flow: flow ?? saved.flow,
+      })
+    );
   } catch {
     // Keep the lightweight project summary when browser storage is full.
   }
 }
+
 
 export function saveAutomationActivity(
   workflowId: string,
@@ -110,6 +144,8 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
   projectId: null,
   snapshot: null,
   result: null,
+  knowledge: null,
+  flow: null,
   projects: [],
   setWorkflow: (workflowId, projectId = null, projectName?: string) => {
     sessionStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify({ workflowId, projectId }));
@@ -144,8 +180,14 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
       if (index >= 0) projects[index] = { ...projects[index], status: result.status, updatedAt: new Date().toISOString(), scenarioCount: result.scenarios.length, testCaseCount: result.test_cases.length };
       saveProjects(projects);
     }
-    set({ result, projects });
+    set({
+      result,
+      projects,
+      knowledge: result?.application_knowledge ?? null,
+      flow: result?.application_flow ?? null,
+    });
   },
+  setKnowledgeAndFlow: (knowledge, flow) => set({ knowledge, flow }),
   renameProject: (workflowId, newName) => {
     const projects = readProjects();
     const index = projects.findIndex((item) => item.workflowId === workflowId);
@@ -171,7 +213,7 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
       sessionStorage.removeItem(WORKFLOW_SNAPSHOT_KEY);
     }
     set((state) => state.workflowId === workflowId
-      ? { projects, workflowId: null, projectId: null, snapshot: null, result: null }
+      ? { projects, workflowId: null, projectId: null, snapshot: null, result: null, knowledge: null, flow: null }
       : { projects });
   },
   hydrate: () => {
@@ -182,15 +224,27 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
       } | null;
       const snapshot = JSON.parse(sessionStorage.getItem(WORKFLOW_SNAPSHOT_KEY) ?? 'null') as WorkflowEvent | null;
       const projects = readProjects();
+      let savedKnowledge = null;
+      let savedFlow = null;
       if (active?.workflowId) {
         setActiveProjectId(active.workflowId);
+        const artifacts = loadTestProjectArtifacts(active.workflowId);
+        savedKnowledge = artifacts?.knowledge ?? null;
+        savedFlow = artifacts?.flow ?? null;
         if (!projects.some((item) => item.workflowId === active.workflowId)) {
           const now = new Date().toISOString();
           projects.unshift({ workflowId: active.workflowId, projectId: active.projectId ?? null, name: `Test project ${String(active.projectId || active.workflowId).slice(0, 8)}`, status: snapshot?.status || 'processing', createdAt: now, updatedAt: now, scenarioCount: 0, testCaseCount: 0, scriptCount: 0 });
           saveProjects(projects);
         }
       }
-      set({ workflowId: active?.workflowId ?? null, projectId: active?.projectId ?? null, snapshot, projects });
+      set({
+        workflowId: active?.workflowId ?? null,
+        projectId: active?.projectId ?? null,
+        snapshot,
+        projects,
+        knowledge: savedKnowledge,
+        flow: savedFlow,
+      });
     } catch {
       sessionStorage.removeItem(WORKFLOW_STORAGE_KEY);
       sessionStorage.removeItem(WORKFLOW_SNAPSHOT_KEY);
@@ -200,6 +254,7 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
     sessionStorage.removeItem(WORKFLOW_STORAGE_KEY);
     sessionStorage.removeItem(WORKFLOW_SNAPSHOT_KEY);
     setActiveProjectId('default');
-    set({ workflowId: null, projectId: null, snapshot: null, result: null });
+    set({ workflowId: null, projectId: null, snapshot: null, result: null, knowledge: null, flow: null });
   },
 }));
+

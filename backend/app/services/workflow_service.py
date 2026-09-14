@@ -34,30 +34,140 @@ class WorkflowService:
         state["workflow_id"]=uuid.UUID(str(state.get("workflow_id") or wid))
         if state.get("project_id"):state["project_id"]=uuid.UUID(str(state["project_id"]))
         return state
-    async def start(self,request):
-        project_id=request.project_id or uuid.uuid4()
+    async def start(self, request):
+        project_id = request.project_id or uuid.uuid4()
         if request.document_session_id:
-            payload=(await document_service.get(request.document_session_id))["input_payload"]
+            payload = (await document_service.get(request.document_session_id))["input_payload"]
         else:
-            payload=(request.input_payload.model_dump() if request.input_payload else await DatabaseInputSource().load(project_id))
-        cache_key=cache.fingerprint("workflow",{"input":payload,"mock_mode":request.mock_mode,"confidence_threshold":request.confidence_threshold,"models":{"generation":settings.groq_generation_model or settings.groq_model,"regeneration":settings.groq_regeneration_model or settings.groq_model}})
-        workflow_id=uuid.uuid4(); state=initial_state(workflow_id,project_id,request.source_type.value,payload,request.mock_mode,request.confidence_threshold);state["cache_key"]=cache_key;state["cache_hit"]=False
-        cached=await cache.get_json(cache_key)
+            payload = (
+                request.input_payload.model_dump()
+                if request.input_payload
+                else await DatabaseInputSource().load(project_id)
+            )
+        if request.application_url:
+            payload["application_url"] = str(request.application_url)
+        if request.crawl_id:
+            payload["crawl_id"] = str(request.crawl_id)
+        if request.application_knowledge:
+            payload["application_knowledge"] = request.application_knowledge
+        if request.application_flow:
+            payload["application_flow"] = request.application_flow
+
+        cache_key = cache.fingerprint(
+            "workflow",
+            {
+                "input": payload,
+                "mock_mode": request.mock_mode,
+                "confidence_threshold": request.confidence_threshold,
+                "models": {
+                    "generation": settings.groq_generation_model or settings.groq_model,
+                    "regeneration": settings.groq_regeneration_model or settings.groq_model,
+                },
+            },
+        )
+        workflow_id = uuid.uuid4()
+        state = initial_state(
+            workflow_id,
+            project_id,
+            request.source_type.value,
+            payload,
+            request.mock_mode,
+            request.confidence_threshold,
+        )
+        state["cache_key"] = cache_key
+        state["cache_hit"] = False
+        cached = await cache.get_json(cache_key)
         if cached:
-            state.update({key:cached.get(key,value) for key,value in {"structured_context":{},"scenarios":[],"scenario_validation":{},"test_cases":[],"testcase_validation":{}}.items()})
-            for collection in ("scenarios","test_cases"):
-                for item in state[collection]: item["project_id"]=str(project_id)
-            state["status"]=state["current_stage"]="completed";state["completed_at"]=datetime.now(timezone.utc);state["cache_hit"]=True
-            self._states[workflow_id]=state;self._persist_state(state);return state
-        self._states[workflow_id]=state; self._tasks[workflow_id]=asyncio.create_task(self._run(workflow_id)); return state
-    async def _run(self,wid):
-        self._states[wid]=await self.orchestrator.run(self._states[wid])
+            state.update(
+                {
+                    key: cached.get(key, value)
+                    for key, value in {
+                        "structured_context": {},
+                        "application_knowledge": None,
+                        "application_flow": None,
+                        "scenarios": [],
+                        "scenario_validation": {},
+                        "test_cases": [],
+                        "testcase_validation": {},
+                    }.items()
+                }
+            )
+            for collection in ("scenarios", "test_cases"):
+                for item in state[collection]:
+                    item["project_id"] = str(project_id)
+            state["status"] = state["current_stage"] = "completed"
+            state["completed_at"] = datetime.now(timezone.utc)
+            state["cache_hit"] = True
+            self._states[workflow_id] = state
+            self._persist_state(state)
+            return state
+        self._states[workflow_id] = state
+        self._tasks[workflow_id] = asyncio.create_task(self._run(workflow_id))
+        return state
+
+    async def _run(self, wid):
+        self._states[wid] = await self.orchestrator.run(self._states[wid])
         await self._cache_completed(self._states[wid])
-    async def _cache_completed(self,state):
-        if state.get("status")!="completed": return
+
+    async def _cache_completed(self, state):
+        if state.get("status") != "completed":
+            return
         self._persist_state(state)
-        if not state.get("cache_key"): return
-        await cache.set_json(state["cache_key"],{"input_payload":state.get("input_payload",{}),"structured_context":state.get("structured_context",{}),"scenarios":state.get("scenarios",[]),"scenario_validation":state.get("scenario_validation",{}),"test_cases":state.get("test_cases",[]),"testcase_validation":state.get("testcase_validation",{})},settings.redis_workflow_ttl_seconds)
+        if not state.get("cache_key"):
+            return
+        await cache.set_json(
+            state["cache_key"],
+            {
+                "input_payload": state.get("input_payload", {}),
+                "structured_context": state.get("structured_context", {}),
+                "application_knowledge": state.get("application_knowledge"),
+                "application_flow": state.get("application_flow"),
+                "scenarios": state.get("scenarios", []),
+                "scenario_validation": state.get("scenario_validation", {}),
+                "test_cases": state.get("test_cases", []),
+                "testcase_validation": state.get("testcase_validation", {}),
+            },
+            settings.redis_workflow_ttl_seconds,
+        )
+
+    def get_knowledge(self, wid):
+        state = self.get(wid)
+        knowledge = state.get("application_knowledge")
+        flow = state.get("application_flow")
+        if not knowledge:
+            loaded = application_knowledge_service.load(wid)
+            if loaded:
+                knowledge, flow = loaded[0].model_dump(mode="json"), loaded[1].model_dump(mode="json")
+                state["application_knowledge"] = knowledge
+                state["application_flow"] = flow
+                self._persist_state(state)
+        return {
+            "workflow_id": wid,
+            "application_url": state.get("input_payload", {}).get("application_url") or (knowledge or {}).get("application_url"),
+            "application_knowledge": knowledge,
+            "application_flow": flow,
+        }
+
+    async def attach_knowledge(self, wid, crawl_id=None, knowledge=None, flow=None):
+        state = self.get(wid)
+        if crawl_id and not knowledge:
+            loaded = application_knowledge_service.load(crawl_id)
+            if loaded:
+                knowledge, flow = loaded[0].model_dump(mode="json"), loaded[1].model_dump(mode="json")
+                application_knowledge_service.persist(wid, loaded[0], loaded[1])
+        if knowledge:
+            state["application_knowledge"] = knowledge
+            state["input_payload"]["application_knowledge"] = knowledge
+        if flow:
+            state["application_flow"] = flow
+            state["input_payload"]["application_flow"] = flow
+        if crawl_id:
+            state["input_payload"]["crawl_id"] = crawl_id
+        if knowledge and knowledge.get("application_url"):
+            state["input_payload"]["application_url"] = knowledge["application_url"]
+        self._persist_state(state)
+        return self.get_knowledge(wid)
+
     def get(self,wid):
         if wid not in self._states:
             restored=self._load_state(wid)

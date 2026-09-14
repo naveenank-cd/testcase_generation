@@ -17,6 +17,121 @@ export interface TechStack {
   database: string;
   testing: string;
   other: string;
+export interface DiscoveredPageInfo {
+  url: string;
+  route_path: string;
+  title?: string | null;
+  module_name?: string | null;
+  element_count: number;
+  interactive_elements_count: number;
+  form_count: number;
+  is_authenticated_page?: boolean;
+}
+
+export interface DiscoveredActionInfo {
+  page_url: string;
+  action_type: 'click' | 'fill' | 'select' | 'check' | 'uncheck' | 'submit' | 'navigate';
+  element_name: string;
+  element_role?: string | null;
+  element_tag: string;
+  verified_locator?: string | null;
+  target_url?: string | null;
+  input_type?: string | null;
+  required?: boolean;
+}
+
+export interface NavigationPathInfo {
+  from_url: string;
+  to_url: string;
+  via_element_name: string;
+  verified_locator?: string | null;
+  action_type: string;
+}
+
+export interface DiscoveredFormFieldInfo {
+  name?: string | null;
+  label?: string | null;
+  input_type?: string | null;
+  placeholder?: string | null;
+  required?: boolean;
+  verified_locator?: string | null;
+}
+
+export interface DiscoveredFormInfo {
+  page_url: string;
+  form_id?: string | null;
+  form_name?: string | null;
+  fields: DiscoveredFormFieldInfo[];
+  submit_button_name?: string | null;
+  submit_locator?: string | null;
+}
+
+export interface ApplicationKnowledge {
+  application_url: string;
+  crawl_id?: string | null;
+  workflow_id?: string | null;
+  project_id?: string | null;
+  crawl_status: 'crawl_completed' | 'crawl_incomplete' | 'crawl_blocked';
+  pages: DiscoveredPageInfo[];
+  elements_by_page?: Record<string, DiscoveredElement[]>;
+  actions: DiscoveredActionInfo[];
+  navigation_paths: NavigationPathInfo[];
+  forms: DiscoveredFormInfo[];
+  verified_locators: Record<string, string>;
+  summary: {
+    total_pages: number;
+    total_elements: number;
+    total_actions: number;
+    total_navigation_paths: number;
+    total_forms: number;
+    crawl_status: string;
+    application_url: string;
+  };
+  created_at?: string;
+}
+
+export interface FlowStep {
+  step_number: number;
+  page_url: string;
+  page_title?: string | null;
+  action: string;
+  element_name?: string | null;
+  verified_locator?: string | null;
+  target_page_url?: string | null;
+  expected_state_change?: string | null;
+  dependencies?: string[];
+}
+
+export interface FlowSequence {
+  sequence_id: string;
+  name: string;
+  description?: string | null;
+  starting_page: string;
+  destination_page?: string | null;
+  steps: FlowStep[];
+  identified_module?: string | null;
+}
+
+export interface FlowTransition {
+  from_page: string;
+  to_page: string;
+  action: string;
+  element_name: string;
+  verified_locator?: string | null;
+  conditions?: string[];
+}
+
+export interface ApplicationFlow {
+  flow_id: string;
+  application_url: string;
+  starting_page: string;
+  sequences: FlowSequence[];
+  transitions: FlowTransition[];
+  state_graph: {
+    nodes: Array<{ id: string; label: string; route: string; module?: string }>;
+    edges: Array<{ source: string; target: string; label: string; action: string }>;
+  };
+  created_at?: string;
 }
 
 export interface ManualInputPayload {
@@ -31,6 +146,10 @@ export interface ManualInputPayload {
   constraints: string[];
   image_ids: string[];
   tech_stack: TechStack;
+  application_url?: string;
+  crawl_id?: string;
+  application_knowledge?: ApplicationKnowledge;
+  application_flow?: ApplicationFlow;
 }
 
 export interface WorkflowStartRequest {
@@ -39,7 +158,12 @@ export interface WorkflowStartRequest {
   document_session_id?: string;
   mock_mode?: boolean;
   confidence_threshold?: number;
+  application_url?: string;
+  crawl_id?: string;
+  application_knowledge?: ApplicationKnowledge;
+  application_flow?: ApplicationFlow;
 }
+
 
 export interface ParsedDocumentStory {
   id?: string;
@@ -154,6 +278,8 @@ export interface WorkflowResult {
   status: WorkflowStatus;
   current_stage?: string;
   structured_context?: StructuredContext | null;
+  application_knowledge?: ApplicationKnowledge | null;
+  application_flow?: ApplicationFlow | null;
   scenarios: Scenario[];
   scenario_validation?: ValidationResult | null;
   test_cases: TestCase[];
@@ -161,6 +287,7 @@ export interface WorkflowResult {
   manual_intervention_reason?: string;
   confidence_threshold?: number;
 }
+
 
 export interface ResumeRequest {
   stage: 'scenario_manual_review' | 'testcase_manual_review';

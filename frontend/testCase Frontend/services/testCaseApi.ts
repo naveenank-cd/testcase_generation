@@ -290,6 +290,35 @@ export const testCaseApi = {
     });
   },
 
+  getApplicationKnowledge(identifier: string) {
+    return request<{
+      crawl_id?: string;
+      workflow_id?: string;
+      application_url: string;
+      application_knowledge?: any;
+      application_flow?: any;
+    }>(`/api/v1/automation/url-crawl/${identifier}/knowledge`).catch(() =>
+      request<{
+        workflow_id: string;
+        application_url: string;
+        application_knowledge?: any;
+        application_flow?: any;
+      }>(`/api/v1/workflows/${identifier}/knowledge`)
+    );
+  },
+
+  attachCrawl(workflowId: string, payload: { crawl_id?: string; application_knowledge?: any; application_flow?: any }) {
+    return request<{
+      workflow_id: string;
+      application_url: string;
+      application_knowledge?: any;
+      application_flow?: any;
+    }>(`/api/v1/workflows/${workflowId}/attach-crawl`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
   connectToWorkflowEvents(
     workflowId: string,
     handlers: { onEvent: (event: WorkflowEvent) => void; onError: () => void; onOpen?: () => void }
@@ -304,3 +333,4 @@ export const testCaseApi = {
     return () => source.close();
   },
 };
+

@@ -10,12 +10,8 @@ backend/.env
 storage/images/
 backend/storage/images/
 backend/artifacts/automation/
-artifacts/automation/reports/exec-*.json
-artifacts/automation/jobs/
-artifacts/automation/crawl-evidence/
-artifacts/automation/crawl-*/
-artifacts/automation/gen-*/
-artifacts/automation/workflows/
+artifacts/
+exec-*.json
 
 # Generated test application suites (keep example/ tracked)
 generated_automation/*

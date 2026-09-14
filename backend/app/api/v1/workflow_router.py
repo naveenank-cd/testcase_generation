@@ -12,7 +12,7 @@ async def start_workflow(request:WorkflowStartRequest):
 async def get_workflow(workflow_id:uuid.UUID): return workflow_service.get(workflow_id)
 @router.get("/{workflow_id}/result",summary="Get generated results")
 async def get_result(workflow_id:uuid.UUID):
-    s=workflow_service.get(workflow_id);return {k:s.get(k) for k in ("workflow_id","project_id","status","current_stage","errors","manual_intervention_reason","confidence_threshold","structured_context","scenarios","scenario_validation","test_cases","testcase_validation")}
+    s=workflow_service.get(workflow_id);return {k:s.get(k) for k in ("workflow_id","project_id","status","current_stage","errors","manual_intervention_reason","confidence_threshold","structured_context","application_knowledge","application_flow","scenarios","scenario_validation","test_cases","testcase_validation")}
 @router.get("/{workflow_id}/events",summary="Stream workflow status events")
 async def events(workflow_id:uuid.UUID):
     async def stream():
@@ -41,6 +41,17 @@ async def events(workflow_id:uuid.UUID):
             if s["status"] in {"completed","failed","cancelled","scenario_manual_review","testcase_manual_review"}: break
             await asyncio.sleep(.5)
     return StreamingResponse(stream(),media_type="text/event-stream")
+@router.get("/{workflow_id}/knowledge", summary="Get discovered Application Knowledge and Application Flow")
+async def get_knowledge(workflow_id: uuid.UUID):
+    return workflow_service.get_knowledge(workflow_id)
+@router.post("/{workflow_id}/attach-crawl", summary="Attach crawl Application Knowledge and Flow to workflow")
+async def attach_crawl(workflow_id: uuid.UUID, body: dict):
+    return await workflow_service.attach_knowledge(
+        workflow_id,
+        crawl_id=body.get("crawl_id"),
+        knowledge=body.get("application_knowledge"),
+        flow=body.get("application_flow"),
+    )
 @router.post("/{workflow_id}/resume",summary="Resume after manual correction")
 async def resume(workflow_id:uuid.UUID,request:ResumeRequest): return await workflow_service.resume(workflow_id,request)
 @router.post("/{workflow_id}/cancel",summary="Cancel workflow")
@@ -56,3 +67,4 @@ async def approve_review(workflow_id:uuid.UUID,request:WorkflowReviewApprovalReq
 @router.put("/{workflow_id}/testcases/{test_case_id}", summary="Update a testcase inside the workflow's active state")
 async def update_workflow_testcase(workflow_id: uuid.UUID, test_case_id: uuid.UUID, body: dict):
     return await workflow_service.update_testcase(workflow_id, test_case_id, body)
+

@@ -53,7 +53,9 @@ from app.services.cache_service import cache
 from app.services.workflow_service import workflow_service
 from app.services.test_data_service import test_data_engine
 from app.services.project_structure_generator import ProjectStructureGenerator, project_structure_generator
+from app.services.application_knowledge_service import application_knowledge_service
 from tests import config as playwright_test_config
+
 
 R = TypeVar("R")
 logger = logging.getLogger(__name__)
@@ -3255,7 +3257,7 @@ class AutomationService:
             stored,
             settings.redis_crawl_ttl_seconds,
         )
-        return CrawlAnalysisResponse(
+        response_obj = CrawlAnalysisResponse(
             crawl_id=crawl_id,
             application_url=url,
             crawl_status=report.get("status", "crawl_incomplete"),
@@ -3266,6 +3268,18 @@ class AutomationService:
             application_map=application_map,
             discovered_elements=elements,
         )
+        try:
+            knowledge, flow = application_knowledge_service.build_knowledge_and_flow(
+                response_obj,
+                workflow_id=request.workflow_id,
+            )
+            application_knowledge_service.persist(crawl_id, knowledge, flow)
+            if request.workflow_id:
+                application_knowledge_service.persist(request.workflow_id, knowledge, flow)
+        except Exception as exc:
+            logger.warning("Could not build/persist application knowledge for crawl %s: %s", crawl_id, exc)
+        return response_obj
+
 
     async def _cache_generation(self, generation_id: str) -> None:
         generation = self._generations[generation_id]
@@ -3471,6 +3485,13 @@ class AutomationService:
             discovered_elements=elements,
             application_map=application_map,
         )
+
+        try:
+            from app.services.application_knowledge_service import application_knowledge_service
+            knowledge, flow = application_knowledge_service.build_knowledge_and_flow(response)
+            application_knowledge_service.persist(crawl_id, knowledge, flow)
+        except Exception as exc:
+            logger.warning("Could not build/persist application knowledge for crawl %s: %s", crawl_id, exc)
 
         # Persist manifest for download route
         (directory / "crawl.json").write_text(

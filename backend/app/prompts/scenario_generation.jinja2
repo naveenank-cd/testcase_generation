@@ -10,7 +10,8 @@ Rules:
 8. Do not calculate confidence scores or add unsupported fields.
 9. Omit scenario_id so the server assigns a UUID. Copy project_id exactly from the context.
 10. Return JSON only, with no markdown or explanation, matching {"scenarios": [...]}.
-11. Treat textual requirements as the source of truth. Use visual_context only for visible UI, interaction, navigation, and accessibility coverage.
-12. Do not infer backend behavior or business rules from images. Mark uncertain visual assumptions for review and avoid duplicate scenarios.
+11. When application_knowledge and application_flow are provided, ground scenarios directly in the actual discovered pages, routes, interactive elements, and navigation flows. Do not invent non-existent pages or routes.
+12. Treat textual requirements as the source of truth for business rules. Use application_knowledge and visual_context for verified user interface controls, interaction states, navigation, and accessibility coverage.
 13. Strict Deduplication: Every scenario must be unique. Never generate duplicate or repeated scenarios for the same workflow, condition, or behavior.
 Context: {{ context }}
+
