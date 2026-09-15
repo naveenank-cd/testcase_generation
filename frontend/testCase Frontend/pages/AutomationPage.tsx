@@ -12,8 +12,18 @@ import type { CrawlAnalysis, DeveloperExecutionReport, ExecutionJob, ExecutionRe
 import { downloadFile, friendlyError, friendlyId, loadActiveProjectName, registerFriendlyIds, setActiveProjectId } from '../utils';
 
 export function AutomationPage() {
-  const historyMode = useSearchParams().get('view') === 'history';
-  const { workflowId, hydrate } = useTestCaseWorkflowStore();
+  const searchParams = useSearchParams();
+  const historyMode = searchParams.get('view') === 'history';
+  const urlWorkflowId = searchParams.get('workflowId') || searchParams.get('workflow_id');
+  const { workflowId: storeWorkflowId, hydrate, setWorkflow } = useTestCaseWorkflowStore();
+  const workflowId = urlWorkflowId || storeWorkflowId;
+
+  useEffect(() => {
+    hydrate();
+    if (urlWorkflowId && urlWorkflowId !== storeWorkflowId) {
+      setWorkflow(urlWorkflowId);
+    }
+  }, [hydrate, urlWorkflowId, storeWorkflowId, setWorkflow]);
   const [projectName, setProjectName] = useState(() => (typeof window !== 'undefined' ? (loadActiveProjectName(workflowId || undefined) || '') : ''));
   const [applicationUrl, setApplicationUrl] = useState('');
   const [authenticationEmail, setAuthenticationEmail] = useState('');

@@ -22,9 +22,12 @@ def deduplicate_test_cases(test_cases: list[TestCase]) -> list[TestCase]:
             continue
         is_duplicate = False
         for existing in unique:
+            different_ac = bool(set(tc.acceptance_criteria_ids) - set(existing.acceptance_criteria_ids))
+            if different_ac:
+                continue
             title_sim = similarity(tc.title, existing.title)
             desc_sim = similarity(tc.description, existing.description)
-            if title_sim >= 0.88 or (title_sim >= 0.75 and desc_sim >= 0.85):
+            if title_sim >= 0.95 or (title_sim >= 0.88 and desc_sim >= 0.92):
                 is_duplicate = True
                 break
         if not is_duplicate:

@@ -1,17 +1,23 @@
 Generate accurate, detailed, non-duplicated test scenarios using only the supplied project context.
 Rules:
-1. Do not invent functionality or source IDs.
-2. Preserve requirement, feature, user-story, and acceptance-criterion IDs exactly.
-3. Cover every relevant acceptance criterion.
-4. Generate positive, negative, and boundary scenarios only where relevant.
-5. Generate integration, security, performance, accessibility, or data-validation scenarios only when supported by the input.
-6. Use only scenario_type values supported by the response schema.
-7. Every scenario must validate a clear business behavior.
-8. Do not calculate confidence scores or add unsupported fields.
-9. Omit scenario_id so the server assigns a UUID. Copy project_id exactly from the context.
-10. Return JSON only, with no markdown or explanation, matching {"scenarios": [...]}.
-11. When application_knowledge and application_flow are provided, ground scenarios directly in the actual discovered pages, routes, interactive elements, and navigation flows. Do not invent non-existent pages or routes.
-12. Treat textual requirements as the source of truth for business rules. Use application_knowledge and visual_context for verified user interface controls, interaction states, navigation, and accessibility coverage.
-13. Strict Deduplication: Every scenario must be unique. Never generate duplicate or repeated scenarios for the same workflow, condition, or behavior.
+1. Universal Domain Application: Dynamically adapt to any application domain (SaaS, E-Commerce, Healthcare, FinTech, Internal Portals, etc.) based strictly on the provided context and application knowledge. Do not assume or hardcode any domain-specific entities not present in the input.
+2. Complete Acceptance Criteria Coverage & Expansion:
+   - Every individual acceptance criterion MUST have at least one dedicated scenario. Never merge multiple distinct acceptance criteria into a single scenario.
+   - For each acceptance criterion, generate comprehensive test variations according to standard QA test design:
+     a) Positive / Happy Path: Validate expected functional success under valid inputs.
+     b) Negative Path: Validate failure handling, validation warnings, or rejection when conditions are unmet or inputs are invalid.
+     c) Boundary / Edge: Validate exact thresholds, limits, minimum/maximum conditions, state persistence, or transitional edge states.
+     d) Integration / Concurrency / Multi-rule: Validate interactions when multiple business rules, validations, or constraints coexist.
+   - For multi-criteria features, produce a standard, thorough test suite (aiming for 12 to 18 well-defined scenarios).
+3. Do not invent functionality or source IDs.
+4. Preserve requirement, feature, user-story, and acceptance-criterion IDs exactly.
+5. Use only scenario_type values supported by the response schema (positive, negative, boundary, integration, security, performance, accessibility, data_validation).
+6. Every scenario must validate a clear, measurable business behavior.
+7. Do not calculate confidence scores or add unsupported fields.
+8. Omit scenario_id so the server assigns a UUID. Copy project_id exactly from the context.
+9. Return JSON only, with no markdown or explanation, matching {"scenarios": [...]}.
+10. Grounding in Target Application: When application_url, application_knowledge, and application_flow are provided, ground all scenario descriptions directly in the actual discovered pages, routes, interactive elements, and navigation flows. Do not invent non-existent pages or routes.
+11. Treat textual requirements as the source of truth for business rules. Use application_knowledge and visual_context for verified user interface controls, interaction states, navigation, and accessibility coverage.
+12. Strict Deduplication: Every scenario must have a distinct test purpose and verification condition. Never generate duplicate or repeated scenarios for the exact same condition.
 Context: {{ context }}
 

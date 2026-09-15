@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Check, ChevronDown, ChevronUp, Clipboard, Download, RefreshCw, X } from 'lucide-react';
 import { StatePanel } from '../components/StatePanel';
 import { Modal } from '@/components/common/Modal';
@@ -15,7 +15,10 @@ type Tab = 'scenarios' | 'testCases' | 'validation' | 'traceability';
 
 export function ResultsPage() {
   const router = useRouter();
-  const { workflowId, result, hydrate, setResult, clear } = useTestCaseWorkflowStore();
+  const searchParams = useSearchParams();
+  const urlWorkflowId = searchParams.get('workflowId') || searchParams.get('workflow_id');
+  const { workflowId: storeWorkflowId, result, hydrate, setWorkflow, setResult, clear } = useTestCaseWorkflowStore();
+  const workflowId = urlWorkflowId || storeWorkflowId;
   const [data, setData] = useState<WorkflowResult | null>(result);
   const [loading, setLoading] = useState(!result);
   const [error, setError] = useState('');
@@ -30,7 +33,13 @@ export function ResultsPage() {
   const [decisions, setDecisions] = useState<Record<string, 'approved' | 'rejected'>>({});
   const pageSize = 10;
 
-  useEffect(() => hydrate(), [hydrate]);
+  useEffect(() => {
+    hydrate();
+    if (urlWorkflowId && urlWorkflowId !== storeWorkflowId) {
+      setWorkflow(urlWorkflowId);
+    }
+  }, [hydrate, urlWorkflowId, storeWorkflowId, setWorkflow]);
+
   useEffect(() => {
     if (!workflowId || data) return;
     testCaseApi.getWorkflowResult(workflowId).then((response) => {

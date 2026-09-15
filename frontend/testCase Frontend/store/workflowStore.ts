@@ -218,10 +218,21 @@ export const useTestCaseWorkflowStore = create<WorkflowStore>((set) => ({
   },
   hydrate: () => {
     try {
-      const active = JSON.parse(sessionStorage.getItem(WORKFLOW_STORAGE_KEY) ?? 'null') as {
+      let active = JSON.parse(sessionStorage.getItem(WORKFLOW_STORAGE_KEY) ?? 'null') as {
         workflowId?: string;
         projectId?: string;
       } | null;
+      if (typeof window !== 'undefined') {
+        const search = window.location.search;
+        if (search) {
+          const params = new URLSearchParams(search);
+          const qWid = params.get('workflowId') || params.get('workflow_id');
+          if (qWid) {
+            active = { workflowId: qWid, projectId: active?.projectId };
+            sessionStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(active));
+          }
+        }
+      }
       const snapshot = JSON.parse(sessionStorage.getItem(WORKFLOW_SNAPSHOT_KEY) ?? 'null') as WorkflowEvent | null;
       const projects = readProjects();
       let savedKnowledge = null;
