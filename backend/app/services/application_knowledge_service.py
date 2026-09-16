@@ -13,6 +13,8 @@ from app.core.config import settings
 from app.schemas.application_knowledge_schema import (
     ApplicationFlow,
     ApplicationKnowledge,
+    ApplicationModuleInfo,
+    ApplicationModel,
     DiscoveredActionInfo,
     DiscoveredFormFieldInfo,
     DiscoveredFormInfo,
@@ -20,7 +22,11 @@ from app.schemas.application_knowledge_schema import (
     FlowSequence,
     FlowStep,
     FlowTransition,
+    InteractiveControlSummary,
+    InteractiveOptionInfo,
+    InteractiveStateObservation,
     NavigationPathInfo,
+    ObservedStateTransition,
 )
 from app.schemas.automation_schema import CrawlAnalysisResponse, DiscoveredElement
 
@@ -309,12 +315,37 @@ class ApplicationKnowledgeService:
                     )
                 )
 
+        # 6. Extract Interactive Controls and Observations
+        raw_controls = crawl_dict.get("interactive_controls") or crawl_report.get("interactive_controls", []) or []
+        interactive_controls: list[InteractiveControlSummary] = []
+        for c in raw_controls:
+            if isinstance(c, InteractiveControlSummary):
+                interactive_controls.append(c)
+            elif isinstance(c, dict):
+                try:
+                    interactive_controls.append(InteractiveControlSummary.model_validate(c))
+                except Exception:
+                    pass
+
+        raw_observations = crawl_dict.get("interactive_observations") or crawl_report.get("interactive_observations", []) or []
+        interactive_observations: list[InteractiveStateObservation] = []
+        for o in raw_observations:
+            if isinstance(o, InteractiveStateObservation):
+                interactive_observations.append(o)
+            elif isinstance(o, dict):
+                try:
+                    interactive_observations.append(InteractiveStateObservation.model_validate(o))
+                except Exception:
+                    pass
+
         summary = {
             "total_pages": len(pages),
             "total_elements": len(discovered_elements),
             "total_actions": len(actions),
             "total_navigation_paths": len(navigation_paths),
             "total_forms": len(forms),
+            "total_interactive_controls": len(interactive_controls),
+            "total_interactive_observations": len(interactive_observations),
             "crawl_status": crawl_status,
             "application_url": app_url,
         }
@@ -330,11 +361,13 @@ class ApplicationKnowledgeService:
             actions=actions,
             navigation_paths=navigation_paths,
             forms=forms,
+            interactive_controls=interactive_controls,
+            interactive_observations=interactive_observations,
             verified_locators=verified_locators,
             summary=summary,
         )
 
-        # 6. Derive Application Flow
+        # 7. Derive Application Flow
         flow = self._derive_application_flow(knowledge, navigation_paths, pages, forms, actions)
         return knowledge, flow
 
@@ -518,6 +551,46 @@ class ApplicationKnowledgeService:
             )
             seq_idx += 1
 
+        # 4. Interactive State Sequences
+        for ctrl in knowledge.interactive_controls:
+            if ctrl.observed_transitions:
+                c_page = next((p for p in pages if p.url == ctrl.page_url), None)
+                ctrl_steps: list[FlowStep] = [
+                    FlowStep(
+                        step_number=1,
+                        page_url=ctrl.page_url,
+                        page_title=c_page.title if c_page else "Application View",
+                        action=f"Navigate to page '{ctrl.page_url}'",
+                        expected_state_change="Interactive control is rendered and accessible.",
+                    )
+                ]
+                s_idx = 2
+                for trans in ctrl.observed_transitions:
+                    ctrl_steps.append(
+                        FlowStep(
+                            step_number=s_idx,
+                            page_url=ctrl.page_url,
+                            page_title=c_page.title if c_page else "Application View",
+                            action=f"{trans.action_type.title()} option '{trans.option_selected}' on control '{ctrl.control_name}'",
+                            element_name=ctrl.control_name,
+                            verified_locator=ctrl.verified_locator,
+                            expected_state_change=trans.visible_changes_observed or f"Application state fingerprint updates from '{trans.initial_state_fingerprint}' to '{trans.resulting_state_fingerprint}'.",
+                        )
+                    )
+                    s_idx += 1
+                sequences.append(
+                    FlowSequence(
+                        sequence_id=f"seq-{seq_idx:03d}",
+                        name=f"Explore {ctrl.control_name}",
+                        description=f"Exercise state transitions for {ctrl.control_type} on {ctrl.page_url}",
+                        starting_page=ctrl.page_url,
+                        destination_page=ctrl.page_url,
+                        steps=ctrl_steps,
+                        identified_module=c_page.module_name if c_page else "Interactive Components",
+                    )
+                )
+                seq_idx += 1
+
         # Build Graph
         state_graph = {
             "nodes": [
@@ -539,6 +612,170 @@ class ApplicationKnowledgeService:
             state_graph=state_graph,
         )
 
+    def build_application_model(
+        self,
+        knowledge: ApplicationKnowledge,
+        flow: ApplicationFlow,
+        modules: list[ApplicationModuleInfo] | None = None,
+        raw_elements: list[DiscoveredElement] | None = None,
+        crawl_report: dict[str, Any] | None = None,
+    ) -> ApplicationModel:
+        """Constructs a unified evidence-backed Application Model from crawled Application Knowledge and Flow."""
+        if not modules:
+            module_map: dict[str, list[DiscoveredPageInfo]] = {}
+            for p in knowledge.pages:
+                m_name = p.module_name or "General"
+                module_map.setdefault(m_name, []).append(p)
+            modules = [
+                ApplicationModuleInfo(
+                    module_name=m_name,
+                    page_urls=[p.url for p in p_list],
+                    page_titles=[p.title or p.url for p in p_list],
+                    summary=f"Discovered module containing {len(p_list)} page(s)."
+                )
+                for m_name, p_list in module_map.items()
+            ]
+
+        confirmed_states: list[dict[str, Any]] = []
+        for obs in knowledge.interactive_observations:
+            confirmed_states.append({
+                "type": "observed_interactive_transition",
+                "page_url": obs.page_url,
+                "control": obs.control_name,
+                "option": obs.option_chosen,
+                "resulting_fingerprint": obs.resulting_state_fingerprint,
+                "visible_changes": obs.visible_text_delta,
+                "status": "OBSERVED",
+            })
+        for p in knowledge.pages:
+            confirmed_states.append({
+                "type": "observed_page_route",
+                "url": p.url,
+                "title": p.title,
+                "interactive_elements_count": p.interactive_elements_count,
+                "status": "OBSERVED",
+            })
+
+        unknown_or_unexplored: list[dict[str, Any]] = []
+        for ctrl in knowledge.interactive_controls:
+            for opt in ctrl.options:
+                if not any(t.option_selected == opt.label or t.option_selected == opt.value for t in ctrl.observed_transitions):
+                    unknown_or_unexplored.append({
+                        "type": "unprobed_interactive_option",
+                        "page_url": ctrl.page_url,
+                        "control": ctrl.control_name,
+                        "option": opt.label,
+                        "status": "REQUIRES_FURTHER_EXPLORATION",
+                        "note": "Option detected in DOM but not exercised during bounded crawl exploration.",
+                    })
+        if crawl_report:
+            for skipped in crawl_report.get("pages_skipped", []):
+                unknown_or_unexplored.append({
+                    "type": "skipped_page",
+                    "url": skipped.get("url"),
+                    "reason": skipped.get("reason"),
+                    "status": "UNKNOWN",
+                    "note": f"Page was skipped during crawl: {skipped.get('reason')}",
+                })
+
+        all_elements: list[DiscoveredElement] = []
+        if raw_elements:
+            all_elements = raw_elements
+        else:
+            for el_list in knowledge.elements_by_page.values():
+                all_elements.extend(el_list)
+
+        summary = {
+            "total_modules": len(modules),
+            "total_pages": len(knowledge.pages),
+            "total_elements": len(all_elements),
+            "total_interactive_controls": len(knowledge.interactive_controls),
+            "total_observations": len(knowledge.interactive_observations),
+            "confirmed_states_count": len(confirmed_states),
+            "unexplored_items_count": len(unknown_or_unexplored),
+            "application_url": knowledge.application_url,
+        }
+
+        return ApplicationModel(
+            application_id=f"app-model-{uuid.uuid4().hex[:12]}",
+            application_url=knowledge.application_url,
+            crawl_id=knowledge.crawl_id,
+            workflow_id=knowledge.workflow_id,
+            modules=modules,
+            pages=knowledge.pages,
+            elements=all_elements,
+            interactive_controls=knowledge.interactive_controls,
+            observations=knowledge.interactive_observations,
+            flow=flow,
+            navigation_graph=knowledge.navigation_paths,
+            confirmed_states=confirmed_states,
+            unknown_or_unexplored=unknown_or_unexplored,
+            verified_locators=knowledge.verified_locators,
+            summary=summary,
+        )
+
+    async def build_knowledge_flow_and_model(
+        self,
+        crawl_data: CrawlAnalysisResponse | dict[str, Any],
+        workflow_id: uuid.UUID | None = None,
+        project_id: uuid.UUID | None = None,
+        use_ai_normalization: bool = True,
+    ) -> tuple[ApplicationKnowledge, ApplicationFlow, ApplicationModel]:
+        """Builds Knowledge, Flow, and normalized Application Model with Groq AI structuring."""
+        knowledge, flow = self.build_knowledge_and_flow(crawl_data, workflow_id=workflow_id, project_id=project_id)
+
+        modules: list[ApplicationModuleInfo] | None = None
+        if use_ai_normalization and not settings.app_mock_mode:
+            try:
+                from app.llm.client import build_llm_client
+                client = build_llm_client(task="generation")
+                pages_meta = [{"url": p.url, "title": p.title, "route": p.route_path} for p in knowledge.pages[:30]]
+                controls_meta = [{"name": c.control_name, "type": c.control_type, "page": c.page_url} for c in knowledge.interactive_controls[:20]]
+                sys_prompt = (
+                    "You are an enterprise web application architecture specialist. Given the real crawl evidence below, "
+                    "organize the discovered pages and controls into 1 to 8 logical business modules. "
+                    "CRITICAL CONSTRAINT: Do NOT hallucinate unobserved pages or behavior. Use full words in all names. "
+                    "Output valid JSON matching: {\"modules\": [{\"module_name\": str, \"page_urls\": [str], \"page_titles\": [str], \"summary\": str}]}"
+                )
+                user_prompt = f"Application URL: {knowledge.application_url}\nPages:\n{json.dumps(pages_meta, indent=2)}\nControls:\n{json.dumps(controls_meta, indent=2)}"
+                resp = await client.generate(
+                    messages=[
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                )
+                parsed = json.loads(resp.content)
+                if "modules" in parsed and isinstance(parsed["modules"], list) and parsed["modules"]:
+                    modules = [
+                        ApplicationModuleInfo(
+                            module_name=m.get("module_name") or "Application Module",
+                            page_urls=m.get("page_urls", []),
+                            page_titles=m.get("page_titles", []),
+                            summary=m.get("summary"),
+                        )
+                        for m in parsed["modules"]
+                        if isinstance(m, dict)
+                    ]
+            except Exception as llm_err:
+                logger.debug("Groq module normalization fallback to deterministic logic: %s", llm_err)
+                modules = None
+
+        if isinstance(crawl_data, CrawlAnalysisResponse):
+            crawl_dict = crawl_data.model_dump(mode="json")
+        else:
+            crawl_dict = dict(crawl_data)
+        crawl_report = crawl_dict.get("crawl_report", {})
+
+        app_model = self.build_application_model(
+            knowledge,
+            flow,
+            modules=modules,
+            crawl_report=crawl_report,
+        )
+        return knowledge, flow, app_model
+
     def persist(
         self,
         identifier: str | uuid.UUID,
@@ -546,15 +783,29 @@ class ApplicationKnowledgeService:
         flow: ApplicationFlow,
     ) -> Path:
         """Persists Application Knowledge and Application Flow to disk."""
+        return self.persist_all(identifier, knowledge, flow, model=None)
+
+    def persist_all(
+        self,
+        identifier: str | uuid.UUID,
+        knowledge: ApplicationKnowledge,
+        flow: ApplicationFlow,
+        model: ApplicationModel | None = None,
+    ) -> Path:
+        """Persists Application Knowledge, Flow, and unified Application Model to disk."""
         path = self._storage_path(str(identifier))
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "knowledge": knowledge.model_dump(mode="json"),
             "flow": flow.model_dump(mode="json"),
+            "model": model.model_dump(mode="json") if model else None,
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        logger.info("Persisted Application Knowledge and Flow to %s", path)
+        if model:
+            model_path = self.artifact_root / f"{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(identifier))}-model.json"
+            model_path.write_text(json.dumps(model.model_dump(mode="json"), indent=2), encoding="utf-8")
+        logger.info("Persisted Application Knowledge, Flow, and Model to %s", path)
         return path
 
     def load(
@@ -573,6 +824,29 @@ class ApplicationKnowledgeService:
         except Exception as exc:
             logger.warning("Could not load knowledge/flow for %s: %s", identifier, exc)
             return None
+
+    def load_model(
+        self,
+        identifier: str | uuid.UUID,
+    ) -> ApplicationModel | None:
+        """Loads persisted Application Model."""
+        model_path = self.artifact_root / f"{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(identifier))}-model.json"
+        if model_path.is_file():
+            try:
+                data = json.loads(model_path.read_text(encoding="utf-8"))
+                return ApplicationModel.model_validate(data)
+            except Exception:
+                pass
+        path = self._storage_path(str(identifier))
+        if not path.is_file():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if "model" in data and data["model"]:
+                return ApplicationModel.model_validate(data["model"])
+        except Exception as exc:
+            logger.warning("Could not load application model for %s: %s", identifier, exc)
+        return None
 
 
 application_knowledge_service = ApplicationKnowledgeService()

@@ -971,6 +971,21 @@ def test_{_safe_name(test_case["test_case_id"]).replace("-", "_")}(page: Page):
 '''
 
 
+DESTRUCTIVE_ACTION_KEYWORDS = {
+    "delete", "remove", "logout", "log out", "signout", "sign out",
+    "destroy", "purge", "cancel subscription", "reset account",
+    "drop", "kill", "terminate", "clear database", "wipe", "unregister",
+    "close account", "erase", "discard"
+}
+
+
+def is_safe_action_text(text: str | None) -> bool:
+    if not text:
+        return True
+    lower = str(text).lower()
+    return not any(kw in lower for kw in DESTRUCTIVE_ACTION_KEYWORDS)
+
+
 class AutomationService:
     def __init__(self) -> None:
         self._generations: dict[str, dict[str, Any]] = {}
@@ -1545,6 +1560,405 @@ class AutomationService:
             }"""
         )
 
+    @staticmethod
+    async def _detect_interactive_controls(page: Any) -> list[dict[str, Any]]:
+        return await page.evaluate(
+            r"""() => {
+              const isVisible = el => {
+                if (!el) return false;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                const rect = el.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+              };
+              const cleanText = el => (el ? (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ') : '');
+              const getLocator = el => {
+                if (!el) return null;
+                if (el.getAttribute('data-testid')) return `[data-testid="${CSS.escape(el.getAttribute('data-testid'))}"]`;
+                if (el.id) return `#${CSS.escape(el.id)}`;
+                if (el.getAttribute('name')) return `[name="${CSS.escape(el.getAttribute('name'))}"]`;
+                if (el.getAttribute('aria-label')) return `[aria-label="${CSS.escape(el.getAttribute('aria-label'))}"]`;
+                return null;
+              };
+
+              const controls = [];
+              const DESTRUCTIVE_REGEX = /delete|remove|logout|log out|signout|sign out|destroy|purge|cancel subscription|reset account|drop|kill|terminate|wipe|clear/i;
+
+              // 1. Native Select elements
+              document.querySelectorAll('select').forEach((sel, idx) => {
+                if (!isVisible(sel) || sel.disabled) return;
+                const options = Array.from(sel.options).map(opt => ({
+                  label: cleanText(opt) || opt.value || '',
+                  value: opt.value,
+                  locator: `option[value="${CSS.escape(opt.value)}"]`,
+                  is_default_or_selected: opt.selected
+                })).filter(o => o.label || o.value);
+
+                const name = sel.getAttribute('aria-label') || sel.getAttribute('name') || sel.id || `Select Dropdown ${idx + 1}`;
+                if (DESTRUCTIVE_REGEX.test(name)) return;
+                const locator = getLocator(sel) || (sel.id ? `#${CSS.escape(sel.id)}` : `select[name="${CSS.escape(sel.getAttribute('name') || '')}"]`);
+                controls.push({
+                  control_id: `ctrl_select_${idx}_${sel.id || sel.getAttribute('name') || idx}`,
+                  control_name: name,
+                  control_type: 'select_dropdown',
+                  verified_locator: locator,
+                  options: options.slice(0, 10),
+                  raw_tag: 'select'
+                });
+              });
+
+              // 2. Tab lists
+              document.querySelectorAll('[role="tablist"], ul.nav-tabs, .nav-pills').forEach((tl, idx) => {
+                if (!isVisible(tl)) return;
+                const tabEls = tl.querySelectorAll('[role="tab"], .nav-link, a[data-toggle="tab"], button[data-bs-toggle="tab"]');
+                const options = [];
+                tabEls.forEach(tab => {
+                  if (!isVisible(tab)) return;
+                  const label = cleanText(tab);
+                  if (!label || DESTRUCTIVE_REGEX.test(label)) return;
+                  const isSelected = tab.getAttribute('aria-selected') === 'true' || tab.classList.contains('active');
+                  const loc = getLocator(tab) || (tab.id ? `#${CSS.escape(tab.id)}` : null);
+                  options.push({
+                    label: label,
+                    value: tab.getAttribute('data-target') || tab.getAttribute('href') || label,
+                    locator: loc,
+                    is_default_or_selected: isSelected
+                  });
+                });
+                if (options.length > 1) {
+                  controls.push({
+                    control_id: `ctrl_tablist_${idx}`,
+                    control_name: tl.getAttribute('aria-label') || `Tab Navigation ${idx + 1}`,
+                    control_type: 'tab_list',
+                    verified_locator: getLocator(tl) || (tl.id ? `#${CSS.escape(tl.id)}` : '[role="tablist"]'),
+                    options: options.slice(0, 10),
+                    raw_tag: 'tablist'
+                  });
+                }
+              });
+
+              // 3. Custom Comboboxes / Dropdown Buttons
+              document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], button[data-bs-toggle="dropdown"], .dropdown-toggle').forEach((cb, idx) => {
+                if (!isVisible(cb) || cb.disabled) return;
+                if (cb.tagName.toLowerCase() === 'select') return;
+                const name = cb.getAttribute('aria-label') || cb.getAttribute('name') || cleanText(cb) || `Dropdown ${idx + 1}`;
+                if (DESTRUCTIVE_REGEX.test(name)) return;
+                const locator = getLocator(cb) || (cb.id ? `#${CSS.escape(cb.id)}` : null);
+                controls.push({
+                  control_id: `ctrl_combobox_${idx}`,
+                  control_name: name,
+                  control_type: 'combobox_dropdown',
+                  verified_locator: locator,
+                  options: [],
+                  raw_tag: cb.tagName.toLowerCase()
+                });
+              });
+
+              // 4. Radio groups
+              const radioGroups = {};
+              document.querySelectorAll('input[type="radio"]').forEach(r => {
+                if (!isVisible(r) || r.disabled) return;
+                const gName = r.getAttribute('name') || 'default_radio_group';
+                if (DESTRUCTIVE_REGEX.test(gName)) return;
+                if (!radioGroups[gName]) radioGroups[gName] = [];
+                const lbl = r.labels && r.labels[0] ? cleanText(r.labels[0]) : (r.getAttribute('aria-label') || r.value);
+                if (DESTRUCTIVE_REGEX.test(lbl || '')) return;
+                radioGroups[gName].push({
+                  label: lbl || r.value,
+                  value: r.value,
+                  locator: getLocator(r) || `input[type="radio"][value="${CSS.escape(r.value)}"]`,
+                  is_default_or_selected: r.checked
+                });
+              });
+              Object.entries(radioGroups).forEach(([gName, opts], idx) => {
+                if (opts.length > 1) {
+                  controls.push({
+                    control_id: `ctrl_radiogroup_${idx}_${gName}`,
+                    control_name: `Radio Group: ${gName}`,
+                    control_type: 'radio_group',
+                    verified_locator: `input[type="radio"][name="${CSS.escape(gName)}"]`,
+                    options: opts.slice(0, 10),
+                    raw_tag: 'radio'
+                  });
+                }
+              });
+
+              // 5. Accordion / Collapsibles
+              document.querySelectorAll('details, [data-bs-toggle="collapse"], [data-toggle="collapse"]').forEach((acc, idx) => {
+                if (!isVisible(acc)) return;
+                let label = '';
+                let loc = getLocator(acc);
+                if (acc.tagName.toLowerCase() === 'details') {
+                  const summary = acc.querySelector('summary');
+                  label = summary ? cleanText(summary) : 'Details Panel';
+                  loc = summary ? (getLocator(summary) || 'details summary') : loc;
+                } else {
+                  label = cleanText(acc) || acc.getAttribute('aria-label') || `Collapse Panel ${idx + 1}`;
+                }
+                if (label && !DESTRUCTIVE_REGEX.test(label)) {
+                  controls.push({
+                    control_id: `ctrl_accordion_${idx}`,
+                    control_name: label,
+                    control_type: 'accordion_panel',
+                    verified_locator: loc,
+                    options: [
+                      { label: 'Expand / Toggle View', value: 'toggle', locator: loc, is_default_or_selected: false }
+                    ],
+                    raw_tag: acc.tagName.toLowerCase()
+                  });
+                }
+              });
+
+              // 6. Sort headers
+              document.querySelectorAll('th[aria-sort], th.sortable, th button').forEach((th, idx) => {
+                if (!isVisible(th)) return;
+                const txt = cleanText(th);
+                if (txt && txt.length < 50 && !DESTRUCTIVE_REGEX.test(txt)) {
+                  controls.push({
+                    control_id: `ctrl_sort_${idx}`,
+                    control_name: `Sort By: ${txt}`,
+                    control_type: 'sort_header',
+                    verified_locator: getLocator(th) || (th.id ? `#${CSS.escape(th.id)}` : null),
+                    options: [
+                      { label: `Sort by ${txt}`, value: 'sort', locator: getLocator(th), is_default_or_selected: false }
+                    ],
+                    raw_tag: 'th'
+                  });
+                }
+              });
+
+              return controls;
+            }"""
+        )
+
+    async def _explore_interactive_states(
+        self,
+        context: Any,
+        current_url: str,
+        cancel_event: Event | None = None,
+        deadline: float | None = None,
+        max_controls: int = 8,
+        max_options_per_control: int = 5,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        if cancel_event is not None and cancel_event.is_set():
+            return [], []
+        if deadline is not None and time.monotonic() >= deadline:
+            return [], []
+
+        page_controls: list[dict[str, Any]] = []
+        page_observations: list[dict[str, Any]] = []
+
+        try:
+            probe_page = await context.new_page()
+            probe_page.on("dialog", lambda dialog: asyncio.create_task(dialog.dismiss()))
+        except Exception as exc:
+            logger.debug("Failed to create probe page for interactive exploration: %s", exc)
+            return [], []
+
+        try:
+            nav_timeout = min(10000, int(settings.automation_navigation_timeout_seconds * 1000))
+            await probe_page.goto(current_url, wait_until="domcontentloaded", timeout=nav_timeout)
+            await self._crawl_wait(probe_page)
+
+            detected = await self._detect_interactive_controls(probe_page)
+            if not detected:
+                return [], []
+
+            probe_deadline = time.monotonic() + 20.0
+
+            for ctrl in detected[:max_controls]:
+                if (cancel_event is not None and cancel_event.is_set()) or time.monotonic() >= probe_deadline or (deadline is not None and time.monotonic() >= deadline):
+                    break
+
+                raw_options = ctrl.get("options", [])
+                safe_options = [
+                    opt for opt in raw_options
+                    if is_safe_action_text(opt.get("label")) and is_safe_action_text(opt.get("value"))
+                ]
+
+                ctrl_summary = {
+                    "control_id": ctrl["control_id"],
+                    "page_url": current_url,
+                    "control_name": ctrl["control_name"],
+                    "control_type": ctrl["control_type"],
+                    "verified_locator": ctrl.get("verified_locator"),
+                    "options": safe_options,
+                    "observed_transitions": [],
+                    "exploration_status": "DISCOVERED",
+                }
+
+                ordered_options = sorted(safe_options, key=lambda o: 1 if o.get("is_default_or_selected") else 0)
+                options_to_probe = ordered_options[:max_options_per_control]
+
+                for opt in options_to_probe:
+                    if (cancel_event is not None and cancel_event.is_set()) or time.monotonic() >= probe_deadline or (deadline is not None and time.monotonic() >= deadline):
+                        break
+
+                    if _canonical_page_url(probe_page.url) != _canonical_page_url(current_url):
+                        try:
+                            await probe_page.goto(current_url, wait_until="domcontentloaded", timeout=5000)
+                            await self._crawl_wait(probe_page)
+                        except Exception:
+                            pass
+
+                    baseline_url = _canonical_page_url(probe_page.url)
+                    try:
+                        baseline_dom = await probe_page.content()
+                    except Exception:
+                        baseline_dom = ""
+                    baseline_fp = hashlib.sha256(re.sub(r"\s+", " ", baseline_dom).encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+                    action_type = "select" if ctrl["control_type"] == "select_dropdown" else "click"
+                    opt_label = opt.get("label") or opt.get("value") or "option"
+                    probe_success = False
+                    probe_error = None
+
+                    try:
+                        action_timeout = min(1500, int(settings.automation_action_timeout_seconds * 1000))
+                        if ctrl["control_type"] == "select_dropdown" and ctrl.get("verified_locator"):
+                            sel_loc = probe_page.locator(ctrl["verified_locator"]).first
+                            if await sel_loc.is_visible():
+                                if opt.get("value"):
+                                    await sel_loc.select_option(value=opt["value"], timeout=action_timeout)
+                                else:
+                                    await sel_loc.select_option(label=opt["label"], timeout=action_timeout)
+                                probe_success = True
+                        else:
+                            target_loc = None
+                            if opt.get("locator"):
+                                cand = probe_page.locator(opt["locator"]).first
+                                if await cand.count() and await cand.is_visible():
+                                    target_loc = cand
+                            if not target_loc and opt.get("label"):
+                                cand = probe_page.get_by_text(opt["label"], exact=True).first
+                                if await cand.count() and await cand.is_visible():
+                                    target_loc = cand
+                            if not target_loc and ctrl.get("verified_locator"):
+                                cand = probe_page.locator(ctrl["verified_locator"]).first
+                                if await cand.count() and await cand.is_visible():
+                                    target_loc = cand
+
+                            if target_loc:
+                                await target_loc.click(timeout=action_timeout)
+                                probe_success = True
+                            else:
+                                probe_error = "Target locator not visible on page."
+
+                        if probe_success:
+                            await asyncio.sleep(0.4)
+                            try:
+                                await probe_page.wait_for_load_state("domcontentloaded", timeout=1000)
+                            except Exception:
+                                pass
+
+                            resulting_url = _canonical_page_url(probe_page.url)
+                            try:
+                                resulting_dom = await probe_page.content()
+                            except Exception:
+                                resulting_dom = ""
+                            resulting_fp = hashlib.sha256(re.sub(r"\s+", " ", resulting_dom).encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+                            try:
+                                newly_visible = await probe_page.evaluate(
+                                    r"""() => {
+                                      const textList = [];
+                                      document.querySelectorAll('button:visible, a:visible, input:visible, table tr:visible, [role="alert"]:visible, .card:visible').forEach(el => {
+                                        const t = (el.innerText || el.getAttribute('aria-label') || el.value || '').trim();
+                                        if (t && t.length > 1 && t.length < 80) textList.push(t);
+                                      });
+                                      return [...new Set(textList)].slice(0, 10);
+                                    }"""
+                                )
+                            except Exception:
+                                newly_visible = []
+
+                            if baseline_url != resulting_url:
+                                visible_changes = f"Navigation observed: URL changed from {baseline_url} to {resulting_url}"
+                            elif baseline_fp != resulting_fp:
+                                visible_changes = f"Dynamic DOM update observed upon selecting '{opt_label}' (State fingerprint {baseline_fp} -> {resulting_fp}; {len(newly_visible)} elements rendered)."
+                            else:
+                                visible_changes = f"Option '{opt_label}' chosen; state remained stable."
+
+                            transition = {
+                                "action_type": action_type,
+                                "option_selected": opt_label,
+                                "initial_state_fingerprint": baseline_fp,
+                                "resulting_state_fingerprint": resulting_fp,
+                                "url_before": baseline_url,
+                                "url_after": resulting_url,
+                                "status": "OBSERVED",
+                                "visible_changes_observed": visible_changes,
+                                "newly_visible_elements_count": len(newly_visible),
+                                "newly_visible_elements_sample": newly_visible[:5],
+                                "screenshot_path": None,
+                                "error": None,
+                            }
+                            ctrl_summary["observed_transitions"].append(transition)
+                            ctrl_summary["exploration_status"] = "OBSERVED"
+
+                            observation = {
+                                "observation_id": f"obs-{uuid.uuid4().hex[:12]}",
+                                "page_url": current_url,
+                                "control_name": ctrl["control_name"],
+                                "control_type": ctrl["control_type"],
+                                "action_type": action_type,
+                                "option_chosen": opt_label,
+                                "url_before": baseline_url,
+                                "url_after": resulting_url,
+                                "initial_state_fingerprint": baseline_fp,
+                                "resulting_state_fingerprint": resulting_fp,
+                                "newly_visible_elements": newly_visible[:5],
+                                "visible_text_delta": visible_changes,
+                                "screenshot_path": None,
+                                "status": "OBSERVED",
+                                "error": None,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            }
+                            page_observations.append(observation)
+                        else:
+                            ctrl_summary["observed_transitions"].append({
+                                "action_type": action_type,
+                                "option_selected": opt_label,
+                                "initial_state_fingerprint": baseline_fp,
+                                "resulting_state_fingerprint": baseline_fp,
+                                "url_before": baseline_url,
+                                "url_after": baseline_url,
+                                "status": "REQUIRES_FURTHER_EXPLORATION",
+                                "visible_changes_observed": None,
+                                "newly_visible_elements_count": 0,
+                                "newly_visible_elements_sample": [],
+                                "screenshot_path": None,
+                                "error": probe_error or "Probe execution unverified.",
+                            })
+
+                    except Exception as probe_err:
+                        ctrl_summary["observed_transitions"].append({
+                            "action_type": action_type,
+                            "option_selected": opt_label,
+                            "initial_state_fingerprint": baseline_fp,
+                            "resulting_state_fingerprint": baseline_fp,
+                            "url_before": baseline_url,
+                            "url_after": baseline_url,
+                            "status": "REQUIRES_FURTHER_EXPLORATION",
+                            "visible_changes_observed": None,
+                            "newly_visible_elements_count": 0,
+                            "newly_visible_elements_sample": [],
+                            "screenshot_path": None,
+                            "error": str(probe_err)[:200],
+                        })
+
+                page_controls.append(ctrl_summary)
+
+            return page_controls, page_observations
+        except Exception as exc:
+            logger.debug("Safe interactive exploration error for %s: %s", current_url, exc)
+            return page_controls, page_observations
+        finally:
+            try:
+                await probe_page.close()
+            except Exception:
+                pass
+
     async def _discover(
         self,
         url: str,
@@ -1560,6 +1974,9 @@ class AutomationService:
                 "pages_completed": 1, "pages_skipped": [],
                 "remaining_crawl_queue": [], "unprocessed_navigation_states": [],
                 "events": ["crawl_started", "page_discovered", "page_scanned", "crawl_completed"],
+                "interactive_controls": [],
+                "interactive_observations": [],
+                "interactive_states_explored": 0,
             }
             return "Mock Application", [
                 DiscoveredElement(tag="button", role="button", name="Mock submit"),
@@ -1607,6 +2024,9 @@ class AutomationService:
             "unprocessed_navigation_states": [],
             "navigation_relationships": [],
             "page_inventory": [],
+            "interactive_controls": [],
+            "interactive_observations": [],
+            "interactive_states_explored": 0,
             "challenge_evidence": [],
             "console_errors": [],
             "network_failures": [],
@@ -2273,6 +2693,21 @@ class AutomationService:
                                 "interactive/navigation elements were detected after the settle period."
                             )
 
+                    page_interactive_controls = []
+                    page_interactive_observations = []
+                    try:
+                        page_interactive_controls, page_interactive_observations = await self._explore_interactive_states(
+                            context=context,
+                            current_url=current_url,
+                            cancel_event=cancel_event,
+                            deadline=deadline,
+                        )
+                        report["interactive_controls"].extend(page_interactive_controls)
+                        report["interactive_observations"].extend(page_interactive_observations)
+                        report["interactive_states_explored"] = len(report["interactive_observations"])
+                    except Exception as exp_err:
+                        logger.debug("Safe interactive state exploration error url=%s: %s", current_url, exp_err)
+
                     report["page_inventory"].append({
                         "url": current_url,
                         "requested_url": page_url,
@@ -2294,6 +2729,8 @@ class AutomationService:
                         "dom_snapshot": str(dom_snapshot_path),
                         "accessibility_tree": accessibility_tree[:100000],
                         "elements": discovered,
+                        "interactive_controls": page_interactive_controls,
+                        "interactive_observations": page_interactive_observations,
                         "content_analysis": page_content_analysis,
                         "diagnostic": page_diagnostic,
                         "forms": [item for item in discovered if item.get("tag") in {"input", "select", "textarea"}],
@@ -3235,6 +3672,9 @@ class AutomationService:
             "page_count": report.get("pages_completed", application_map["page_count"]),
             "pages_skipped": report.get("pages_skipped", []),
             "crawl_events": report.get("events", []),
+            "interactive_controls": report.get("interactive_controls", []),
+            "interactive_observations": report.get("interactive_observations", []),
+            "interactive_states_explored": len(report.get("interactive_observations", [])),
         })
         stored = {
             "crawl_id": crawl_id,
@@ -3244,6 +3684,9 @@ class AutomationService:
             "crawl_report": report,
             "application_map": application_map,
             "discovered_elements": element_dicts,
+            "interactive_controls": report.get("interactive_controls", []),
+            "interactive_observations": report.get("interactive_observations", []),
+            "interactive_states_explored": len(report.get("interactive_observations", [])),
         }
         self._crawls[crawl_id] = stored
         if request.authentication:
@@ -3269,15 +3712,15 @@ class AutomationService:
             discovered_elements=elements,
         )
         try:
-            knowledge, flow = application_knowledge_service.build_knowledge_and_flow(
+            knowledge, flow, app_model = await application_knowledge_service.build_knowledge_flow_and_model(
                 response_obj,
                 workflow_id=request.workflow_id,
             )
-            application_knowledge_service.persist(crawl_id, knowledge, flow)
+            application_knowledge_service.persist_all(crawl_id, knowledge, flow, app_model)
             if request.workflow_id:
-                application_knowledge_service.persist(request.workflow_id, knowledge, flow)
+                application_knowledge_service.persist_all(request.workflow_id, knowledge, flow, app_model)
         except Exception as exc:
-            logger.warning("Could not build/persist application knowledge for crawl %s: %s", crawl_id, exc)
+            logger.warning("Could not build/persist application knowledge/model for crawl %s: %s", crawl_id, exc)
         return response_obj
 
 
@@ -3488,10 +3931,10 @@ class AutomationService:
 
         try:
             from app.services.application_knowledge_service import application_knowledge_service
-            knowledge, flow = application_knowledge_service.build_knowledge_and_flow(response)
-            application_knowledge_service.persist(crawl_id, knowledge, flow)
+            knowledge, flow, app_model = await application_knowledge_service.build_knowledge_flow_and_model(response)
+            application_knowledge_service.persist_all(crawl_id, knowledge, flow, app_model)
         except Exception as exc:
-            logger.warning("Could not build/persist application knowledge for crawl %s: %s", crawl_id, exc)
+            logger.warning("Could not build/persist application knowledge/model for crawl %s: %s", crawl_id, exc)
 
         # Persist manifest for download route
         (directory / "crawl.json").write_text(

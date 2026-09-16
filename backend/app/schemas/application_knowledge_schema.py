@@ -58,6 +58,58 @@ class DiscoveredFormInfo(BaseModel):
     submit_locator: str | None = None
 
 
+class InteractiveOptionInfo(BaseModel):
+    label: str
+    value: str | None = None
+    locator: str | None = None
+    is_default_or_selected: bool = False
+
+
+class ObservedStateTransition(BaseModel):
+    action_type: str
+    option_selected: str | None = None
+    initial_state_fingerprint: str | None = None
+    resulting_state_fingerprint: str | None = None
+    url_before: str
+    url_after: str
+    status: Literal["OBSERVED", "DISCOVERED", "INFERRED", "UNKNOWN", "REQUIRES_FURTHER_EXPLORATION"] = "OBSERVED"
+    visible_changes_observed: str | None = None
+    newly_visible_elements_count: int = 0
+    newly_visible_elements_sample: list[str] = Field(default_factory=list)
+    screenshot_path: str | None = None
+    error: str | None = None
+
+
+class InteractiveControlSummary(BaseModel):
+    control_id: str
+    page_url: str
+    control_name: str
+    control_type: str
+    verified_locator: str | None = None
+    options: list[InteractiveOptionInfo] = Field(default_factory=list)
+    observed_transitions: list[ObservedStateTransition] = Field(default_factory=list)
+    exploration_status: Literal["OBSERVED", "DISCOVERED", "UNKNOWN", "REQUIRES_FURTHER_EXPLORATION"] = "DISCOVERED"
+
+
+class InteractiveStateObservation(BaseModel):
+    observation_id: str
+    page_url: str
+    control_name: str
+    control_type: str
+    action_type: str
+    option_chosen: str | None = None
+    url_before: str
+    url_after: str
+    initial_state_fingerprint: str
+    resulting_state_fingerprint: str
+    newly_visible_elements: list[str] = Field(default_factory=list)
+    visible_text_delta: str | None = None
+    screenshot_path: str | None = None
+    status: Literal["OBSERVED", "DISCOVERED", "INFERRED", "UNKNOWN", "REQUIRES_FURTHER_EXPLORATION"] = "OBSERVED"
+    error: str | None = None
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 class ApplicationKnowledge(BaseModel):
     """Structured knowledge representing actual discovered information from the deployed application."""
     application_url: str
@@ -70,6 +122,8 @@ class ApplicationKnowledge(BaseModel):
     actions: list[DiscoveredActionInfo] = Field(default_factory=list)
     navigation_paths: list[NavigationPathInfo] = Field(default_factory=list)
     forms: list[DiscoveredFormInfo] = Field(default_factory=list)
+    interactive_controls: list[InteractiveControlSummary] = Field(default_factory=list)
+    interactive_observations: list[InteractiveStateObservation] = Field(default_factory=list)
     verified_locators: dict[str, str] = Field(default_factory=dict)
     summary: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -114,4 +168,31 @@ class ApplicationFlow(BaseModel):
     sequences: list[FlowSequence] = Field(default_factory=list)
     transitions: list[FlowTransition] = Field(default_factory=list)
     state_graph: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ApplicationModuleInfo(BaseModel):
+    module_name: str
+    page_urls: list[str] = Field(default_factory=list)
+    page_titles: list[str] = Field(default_factory=list)
+    summary: str | None = None
+
+
+class ApplicationModel(BaseModel):
+    """Unified evidence-backed Application Model combining Knowledge, Flow, Behaviors, and Verified Locators."""
+    application_id: str
+    application_url: str
+    crawl_id: str | None = None
+    workflow_id: UUID | None = None
+    modules: list[ApplicationModuleInfo] = Field(default_factory=list)
+    pages: list[DiscoveredPageInfo] = Field(default_factory=list)
+    elements: list[DiscoveredElement] = Field(default_factory=list)
+    interactive_controls: list[InteractiveControlSummary] = Field(default_factory=list)
+    observations: list[InteractiveStateObservation] = Field(default_factory=list)
+    flow: ApplicationFlow | None = None
+    navigation_graph: list[NavigationPathInfo] = Field(default_factory=list)
+    confirmed_states: list[dict[str, Any]] = Field(default_factory=list)
+    unknown_or_unexplored: list[dict[str, Any]] = Field(default_factory=list)
+    verified_locators: dict[str, str] = Field(default_factory=dict)
+    summary: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -61,7 +61,7 @@ async def stop_crawl_job(job_id: str):
 
 @router.get(
     "/url-crawl/{crawl_id}/knowledge",
-    summary="Get discovered Application Knowledge and Application Flow for a crawl session",
+    summary="Get discovered Application Knowledge, Flow, and Model for a crawl session",
 )
 async def get_crawl_knowledge(crawl_id: str):
     from fastapi import HTTPException
@@ -70,11 +70,36 @@ async def get_crawl_knowledge(crawl_id: str):
     if not res:
         raise HTTPException(status_code=404, detail="Application Knowledge not found for this crawl.")
     knowledge, flow = res
+    model = application_knowledge_service.load_model(crawl_id)
     return {
         "crawl_id": crawl_id,
         "application_url": knowledge.application_url,
         "application_knowledge": knowledge.model_dump(mode="json"),
         "application_flow": flow.model_dump(mode="json"),
+        "application_model": model.model_dump(mode="json") if model else None,
+    }
+
+
+@router.get(
+    "/url-crawl/{crawl_id}/model",
+    summary="Get unified Application Model for a crawl session",
+)
+async def get_crawl_model(crawl_id: str):
+    from fastapi import HTTPException
+    from app.services.application_knowledge_service import application_knowledge_service
+    model = application_knowledge_service.load_model(crawl_id)
+    if not model:
+        # Fallback: if model not standalone, try loading knowledge and flow to build model dynamically
+        res = application_knowledge_service.load(crawl_id)
+        if res:
+            knowledge, flow = res
+            model = application_knowledge_service.build_application_model(knowledge, flow)
+        else:
+            raise HTTPException(status_code=404, detail="Application Model not found for this crawl.")
+    return {
+        "crawl_id": crawl_id,
+        "application_url": model.application_url,
+        "application_model": model.model_dump(mode="json"),
     }
 
 

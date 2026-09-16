@@ -297,14 +297,24 @@ export const testCaseApi = {
       application_url: string;
       application_knowledge?: any;
       application_flow?: any;
+      application_model?: any;
     }>(`/api/v1/automation/url-crawl/${identifier}/knowledge`).catch(() =>
       request<{
         workflow_id: string;
         application_url: string;
         application_knowledge?: any;
         application_flow?: any;
+        application_model?: any;
       }>(`/api/v1/workflows/${identifier}/knowledge`)
     );
+  },
+
+  getApplicationModel(identifier: string) {
+    return request<{
+      crawl_id: string;
+      application_url: string;
+      application_model: any;
+    }>(`/api/v1/automation/url-crawl/${identifier}/model`);
   },
 
   attachCrawl(workflowId: string, payload: { crawl_id?: string; application_knowledge?: any; application_flow?: any }) {

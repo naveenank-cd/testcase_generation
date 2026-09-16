@@ -14,10 +14,24 @@ import {
   Sparkles,
   Square,
   Layers,
+  SlidersHorizontal,
+  Workflow,
+  Activity,
+  Check,
+  AlertCircle,
+  Eye,
+  Box,
+  CornerDownRight,
 } from 'lucide-react';
 import { testCaseApi } from '../services/testCaseApi';
 import { EntityId } from '../components/TraceabilityUI';
-import type { CrawlGenerationResponse, CrawlJob } from '../types';
+import type {
+  CrawlGenerationResponse,
+  CrawlJob,
+  ApplicationKnowledge,
+  ApplicationFlow,
+  ApplicationModel,
+} from '../types';
 import { downloadFile, friendlyError, friendlyId, registerFriendlyIds, setActiveProjectId } from '../utils';
 
 function downloadAllAsZip(result: CrawlGenerationResponse) {
@@ -38,6 +52,11 @@ export function UrlCrawlerPage() {
   const [result, setResult] = useState<CrawlGenerationResponse | null>(null);
   const [crawlJob, setCrawlJob] = useState<CrawlJob | null>(null);
   const [selectedScript, setSelectedScript] = useState(0);
+  const [activeTab, setActiveTab] = useState<'scripts' | 'model' | 'interactive_controls'>('scripts');
+  const [appKnowledge, setAppKnowledge] = useState<ApplicationKnowledge | null>(null);
+  const [appFlow, setAppFlow] = useState<ApplicationFlow | null>(null);
+  const [appModel, setAppModel] = useState<ApplicationModel | null>(null);
+  const [loadingModel, setLoadingModel] = useState(false);
   const isCrawling = Boolean(
     crawlJob && ['queued', 'running', 'stopping'].includes(crawlJob.status),
   );
@@ -152,6 +171,27 @@ export function UrlCrawlerPage() {
     registerFriendlyIds('scenario', scripts.map((script) => script.scenario_id), scope);
     registerFriendlyIds('case', scripts.map((script) => script.test_case_id), scope);
   }, [result]);
+
+  useEffect(() => {
+    if (!result?.crawl_id) return;
+    let mounted = true;
+    setLoadingModel(true);
+    testCaseApi
+      .getApplicationKnowledge(result.crawl_id)
+      .then((data) => {
+        if (!mounted) return;
+        if (data.application_knowledge) setAppKnowledge(data.application_knowledge);
+        if (data.application_flow) setAppFlow(data.application_flow);
+        if (data.application_model) setAppModel(data.application_model);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setLoadingModel(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [result?.crawl_id]);
 
   return (
     <div className="space-y-6">
@@ -373,16 +413,26 @@ export function UrlCrawlerPage() {
               Playwright is visiting every page, discovering elements, and building test scripts.
               Stop at any time to generate scripts from the pages collected so far.
             </p>
-            {crawlJob?.progress && <p className="mt-2 text-xs text-muted-foreground">
-              {crawlJob.progress.pages_completed ?? 0} pages completed ·{' '}
-              {crawlJob.progress.pages_remaining ?? 0} remaining ·{' '}
-              {crawlJob.progress.elapsed_seconds ?? 0}s elapsed
-            </p>}
+            {crawlJob?.progress && (
+              <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                <p>
+                  {crawlJob.progress.pages_completed ?? 0} pages completed ·{' '}
+                  {crawlJob.progress.pages_remaining ?? 0} remaining ·{' '}
+                  {crawlJob.progress.elapsed_seconds ?? 0} seconds elapsed
+                </p>
+                {(crawlJob.progress.interactive_states_explored ?? 0) > 0 && (
+                  <p className="font-semibold text-primary">
+                    {crawlJob.progress.interactive_states_explored} interactive states explored across{' '}
+                    {crawlJob.progress.interactive_controls_found ?? 0} interactive controls
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex justify-center gap-6 text-xs text-muted-foreground">
             <span>URL validated</span>
-            <span className="animate-pulse">Discovering pages</span>
-            <span className="opacity-40">Generating scripts</span>
+            <span className="animate-pulse">Discovering pages and interactive controls</span>
+            <span className="opacity-40">Generating test scripts</span>
           </div>
         </div>
       )}
@@ -395,45 +445,64 @@ export function UrlCrawlerPage() {
                 <CheckCircle2 className={`h-5 w-5 ${partialResult ? 'text-amber-600' : 'text-green-600'}`} />
                 <div>
                   <p className={`font-semibold ${partialResult ? 'text-amber-700 dark:text-amber-400' : 'text-green-700 dark:text-green-400'}`}>
-                    {partialResult ? 'Scripts generated from available pages' : 'Crawl complete'} &mdash; {result.scripts.length} scripts generated
+                    {partialResult ? 'Test scripts generated from available pages' : 'Crawl completed successfully'} &mdash; {result.scripts.length} test scripts generated
                   </p>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {result.page_title ?? result.url} &middot; {result.pages_crawled} pages &middot; {result.elements_found} elements discovered
                   </p>
                   {partialResult && (
                     <div className="mt-2 space-y-1 text-sm text-amber-700 dark:text-amber-300">
-                      <p>Scripts below were generated from all pages successfully crawled.</p>
+                      <p>Test scripts below were generated from all pages successfully crawled.</p>
                       <p>
                         {result.crawl_report.progress?.pages_discovered ?? result.pages_crawled} discovered ·{' '}
                         {result.crawl_report.progress?.pages_completed ?? result.pages_crawled} completed ·{' '}
                         {result.crawl_report.progress?.pages_remaining ?? result.crawl_report.remaining_crawl_queue.length} remaining ·{' '}
                         depth {result.crawl_report.progress?.current_crawl_depth ?? 0} ·{' '}
-                        elapsed {result.crawl_report.progress?.elapsed_seconds ?? 0}s
+                        elapsed {result.crawl_report.progress?.elapsed_seconds ?? 0} seconds
                         {result.crawl_report.progress?.estimated_completion_seconds != null
-                          ? ` · estimated ${result.crawl_report.progress.estimated_completion_seconds}s remaining`
+                          ? ` · estimated ${result.crawl_report.progress.estimated_completion_seconds} seconds remaining`
                           : ''}
                       </p>
                     </div>
                   )}
                 </div>
               </div>
-              {result.scripts.length > 0 && <button
-                onClick={() => downloadAllAsZip(result)}
-                id="download-all-btn"
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold shadow-sm hover:bg-muted transition"
-              >
-                <Download className="h-4 w-4" />
-                Download all scripts
-              </button>}
+              {result.scripts.length > 0 && (
+                <button
+                  onClick={() => downloadAllAsZip(result)}
+                  id="download-all-btn"
+                  className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-semibold shadow-sm hover:bg-muted transition"
+                >
+                  <Download className="h-4 w-4" />
+                  Download all test scripts
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {/* Stats Bar */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             {[
               { label: 'Pages crawled', value: result.pages_crawled, icon: <Map className="h-4 w-4" /> },
               { label: 'Elements found', value: result.elements_found, icon: <Layers className="h-4 w-4" /> },
-              { label: 'Scripts generated', value: result.scripts.length, icon: <FileCode2 className="h-4 w-4" /> },
-              { label: 'Depth limit', value: depthLimit, icon: <Globe className="h-4 w-4" /> },
+              {
+                label: 'Interactive states explored',
+                value:
+                  appModel?.observations?.length ??
+                  result.crawl_report?.interactive_states_explored ??
+                  result.crawl_report?.interactive_observations?.length ??
+                  0,
+                icon: <Activity className="h-4 w-4" />,
+              },
+              {
+                label: 'Interactive controls',
+                value:
+                  appModel?.interactive_controls?.length ??
+                  result.crawl_report?.interactive_controls?.length ??
+                  0,
+                icon: <SlidersHorizontal className="h-4 w-4" />,
+              },
+              { label: 'Test scripts generated', value: result.scripts.length, icon: <FileCode2 className="h-4 w-4" /> },
             ].map((stat) => (
               <div key={stat.label} className="rounded-xl border border-border bg-card p-4 text-center shadow-sm">
                 <div className="flex justify-center text-primary mb-1">{stat.icon}</div>
@@ -443,60 +512,365 @@ export function UrlCrawlerPage() {
             ))}
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
-            <aside className="space-y-1 rounded-2xl border border-border bg-card p-3 max-h-[40rem] overflow-y-auto">
-              <p className="px-2 py-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                Generated scripts
-              </p>
-              {result.scripts.map((item, index) => (
-                <button
-                  key={item.script_id}
-                  id={`script-btn-${index}`}
-                  onClick={() => setSelectedScript(index)}
-                  className={`w-full rounded-xl p-3 text-left text-sm transition ${
-                    selectedScript === index
-                      ? 'bg-primary text-primary-foreground shadow-md'
-                      : 'hover:bg-muted'
-                  }`}
-                >
-                  <span className="flex items-center gap-2 font-semibold">
-                    <FileCode2 className="h-3.5 w-3.5 shrink-0" />
-                    {item.name}
-                  </span>
-                  <span className="mt-1 block truncate text-xs opacity-70">
-                    {item.page_url ?? item.test_case_id}
-                  </span>
-                  <span className="mt-2 block truncate font-mono text-[10px] opacity-80">Test Script ID · {friendlyId('script', item.script_id)}</span>
-                </button>
-              ))}
-            </aside>
-
-            {script && (
-              <section className="min-w-0 rounded-2xl border border-border bg-card overflow-hidden">
-                <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 p-4">
-                  <div className="min-w-0">
-                    <h2 className="font-semibold">{script.name}</h2>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{script.page_url}</p>
-                    <div className="mt-2"><EntityId kind="script" value={script.script_id} /></div>
-                  </div>
-                  <button
-                    id={`download-script-${script.script_id}`}
-                    onClick={() => downloadFile(`${script.script_id}.py`, script.source, 'text/x-python')}
-                    className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold hover:bg-muted transition"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download
-                  </button>
-                </div>
-                <pre
-                  id="script-preview"
-                  className="max-h-[36rem] overflow-auto p-5 text-xs leading-relaxed font-mono bg-background"
-                >
-                  {script.source}
-                </pre>
-              </section>
-            )}
+          {/* View Selection Tabs */}
+          <div className="flex flex-wrap border-b border-border gap-2">
+            <button
+              id="tab-test-scripts"
+              onClick={() => setActiveTab('scripts')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition ${
+                activeTab === 'scripts'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <FileCode2 className="h-4 w-4" />
+              Generated Test Scripts ({result.scripts.length})
+            </button>
+            <button
+              id="tab-application-model"
+              onClick={() => setActiveTab('model')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition ${
+                activeTab === 'model'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <Workflow className="h-4 w-4" />
+              Application Model and Flow
+              {appModel?.modules?.length ? ` (${appModel.modules.length} Modules)` : ''}
+            </button>
+            <button
+              id="tab-interactive-controls"
+              onClick={() => setActiveTab('interactive_controls')}
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition ${
+                activeTab === 'interactive_controls'
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Interactive States and Controls
+              {(appModel?.interactive_controls?.length ?? result.crawl_report?.interactive_controls?.length ?? 0) > 0
+                ? ` (${appModel?.interactive_controls?.length ?? result.crawl_report?.interactive_controls?.length})`
+                : ''}
+            </button>
           </div>
+
+          {/* TAB 1: Generated Scripts View */}
+          {activeTab === 'scripts' && (
+            <div className="grid gap-6 lg:grid-cols-[18rem_1fr]">
+              <aside className="space-y-1 rounded-2xl border border-border bg-card p-3 max-h-[40rem] overflow-y-auto">
+                <p className="px-2 py-1 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                  Generated test scripts
+                </p>
+                {result.scripts.map((item, index) => (
+                  <button
+                    key={item.script_id}
+                    id={`script-btn-${index}`}
+                    onClick={() => setSelectedScript(index)}
+                    className={`w-full rounded-xl p-3 text-left text-sm transition ${
+                      selectedScript === index
+                        ? 'bg-primary text-primary-foreground shadow-md'
+                        : 'hover:bg-muted'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <FileCode2 className="h-3.5 w-3.5 shrink-0" />
+                      {item.name}
+                    </span>
+                    <span className="mt-1 block truncate text-xs opacity-70">
+                      {item.page_url ?? item.test_case_id}
+                    </span>
+                    <span className="mt-2 block truncate font-mono text-[10px] opacity-80">Test Script Identifier · {friendlyId('script', item.script_id)}</span>
+                  </button>
+                ))}
+              </aside>
+
+              {script && (
+                <section className="min-w-0 rounded-2xl border border-border bg-card overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 p-4">
+                    <div className="min-w-0">
+                      <h2 className="font-semibold">{script.name}</h2>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{script.page_url}</p>
+                      <div className="mt-2"><EntityId kind="script" value={script.script_id} /></div>
+                    </div>
+                    <button
+                      id={`download-script-${script.script_id}`}
+                      onClick={() => downloadFile(`${script.script_id}.py`, script.source, 'text/x-python')}
+                      className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm font-semibold hover:bg-muted transition"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </button>
+                  </div>
+                  <pre
+                    id="script-preview"
+                    className="max-h-[36rem] overflow-auto p-5 text-xs leading-relaxed font-mono bg-background"
+                  >
+                    {script.source}
+                  </pre>
+                </section>
+              )}
+            </div>
+          )}
+
+          {/* TAB 2: Application Model and Flow View */}
+          {activeTab === 'model' && (
+            <div className="space-y-6">
+              {loadingModel && (
+                <div className="rounded-xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+                  <LoaderCircle className="mx-auto h-6 w-6 animate-spin text-primary mb-2" />
+                  Loading application model and flow analysis...
+                </div>
+              )}
+
+              {/* Modules Overview */}
+              <div className="space-y-3">
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  <Box className="h-5 w-5 text-primary" />
+                  Discovered Application Modules
+                </h3>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {(appModel?.modules ?? []).map((mod, idx) => (
+                    <div key={idx} className="rounded-xl border border-border bg-card p-4 space-y-2 shadow-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-sm text-foreground">{mod.module_name}</span>
+                        <span className="text-[10px] font-mono rounded bg-primary/10 text-primary px-2 py-0.5">
+                          {mod.page_urls.length} Page{mod.page_urls.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      {mod.summary && <p className="text-xs text-muted-foreground">{mod.summary}</p>}
+                      <div className="pt-2 border-t border-border/50 space-y-1">
+                        {mod.page_titles.slice(0, 4).map((title, pIdx) => (
+                          <div key={pIdx} className="flex items-center gap-1.5 text-xs text-muted-foreground truncate">
+                            <CornerDownRight className="h-3 w-3 text-primary shrink-0" />
+                            <span className="truncate">{title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {(!appModel?.modules || appModel.modules.length === 0) && (
+                    <div className="col-span-full rounded-xl border border-border bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+                      No explicit module grouping available yet.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Flow Sequences */}
+              <div className="space-y-3">
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  <Workflow className="h-5 w-5 text-primary" />
+                  Verified Application Flow Sequences
+                </h3>
+                <div className="space-y-3">
+                  {(appModel?.flow?.sequences ?? appFlow?.sequences ?? []).map((seq, seqIdx) => (
+                    <div key={seqIdx} className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <span className="font-bold text-sm text-foreground">{seq.name}</span>
+                          {seq.description && <p className="text-xs text-muted-foreground mt-0.5">{seq.description}</p>}
+                        </div>
+                        <span className="text-xs font-mono rounded bg-muted px-2 py-0.5 text-muted-foreground">
+                          {seq.steps.length} Steps
+                        </span>
+                      </div>
+                      <div className="space-y-2 border-l-2 border-primary/40 pl-3 pt-1">
+                        {seq.steps.map((st) => (
+                          <div key={st.step_number} className="text-xs space-y-0.5">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-primary">Step {st.step_number}:</span>
+                              <span className="font-medium text-foreground">{st.action}</span>
+                            </div>
+                            {st.verified_locator && (
+                              <p className="font-mono text-[10px] text-muted-foreground bg-muted/40 rounded px-1.5 py-0.5 inline-block">
+                                Locator: {st.verified_locator}
+                              </p>
+                            )}
+                            {st.expected_state_change && (
+                              <p className="text-[11px] text-muted-foreground italic">
+                                Expected State Change: {st.expected_state_change}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Verified vs Unexplored Evidence Status */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="rounded-xl border border-green-500/20 bg-green-500/5 p-4 space-y-2">
+                  <h4 className="text-sm font-bold text-green-700 dark:text-green-400 flex items-center gap-2">
+                    <Check className="h-4 w-4" />
+                    Confirmed Real Application Behaviors ({appModel?.confirmed_states?.length ?? 0})
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Behaviors and states observed directly in the deployed browser via Playwright execution.
+                  </p>
+                  <div className="max-h-60 overflow-y-auto space-y-1.5 pt-2">
+                    {(appModel?.confirmed_states ?? []).map((st, idx) => (
+                      <div key={idx} className="rounded bg-background p-2 text-xs border border-border/50">
+                        <span className="font-semibold text-foreground">
+                          {st.control ?? st.title ?? st.type}
+                        </span>
+                        {st.visible_changes && <p className="text-[11px] text-muted-foreground mt-0.5">{st.visible_changes}</p>}
+                        <span className="inline-block mt-1 text-[10px] font-bold rounded bg-green-500/10 text-green-600 px-1.5 py-0.5">
+                          OBSERVED
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
+                  <h4 className="text-sm font-bold text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4" />
+                    Requires Further Exploration / Unknown ({appModel?.unknown_or_unexplored?.length ?? 0})
+                  </h4>
+                  <p className="text-xs text-muted-foreground">
+                    Discovered elements, options, or skipped routes not exercised during bounded crawl exploration.
+                  </p>
+                  <div className="max-h-60 overflow-y-auto space-y-1.5 pt-2">
+                    {(appModel?.unknown_or_unexplored ?? []).map((un, idx) => (
+                      <div key={idx} className="rounded bg-background p-2 text-xs border border-border/50">
+                        <span className="font-semibold text-foreground">
+                          {un.control ? `${un.control} · Option '${un.option}'` : un.url ?? un.type}
+                        </span>
+                        {un.note && <p className="text-[11px] text-muted-foreground mt-0.5">{un.note}</p>}
+                        <span className="inline-block mt-1 text-[10px] font-bold rounded bg-amber-500/10 text-amber-600 px-1.5 py-0.5">
+                          {un.status ?? 'REQUIRES FURTHER EXPLORATION'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: Interactive States and Controls View */}
+          {activeTab === 'interactive_controls' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-card p-4 space-y-1">
+                <h3 className="text-sm font-bold flex items-center gap-2">
+                  <SlidersHorizontal className="h-4 w-4 text-primary" />
+                  Interactive State Exploration Evidence
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Controls discovered across all crawled pages. Safe options (dropdown items, tabs, radio choices, accordions, and sort headers) were probed non-destructively to observe DOM changes, rendering updates, and state transitions.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {(appModel?.interactive_controls ?? result.crawl_report?.interactive_controls ?? []).map((ctrl: any, cIdx: number) => (
+                  <div key={cIdx} className="rounded-xl border border-border bg-card p-4 space-y-3 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-sm text-foreground">{ctrl.control_name}</span>
+                          <span className="rounded bg-primary/10 text-primary px-2 py-0.5 text-[10px] font-semibold">
+                            {ctrl.control_type.replace('_', ' ').toUpperCase()}
+                          </span>
+                          <span className="rounded bg-green-500/10 text-green-600 px-2 py-0.5 text-[10px] font-bold">
+                            {ctrl.exploration_status ?? 'OBSERVED'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">Page URL: {ctrl.page_url}</p>
+                        {ctrl.verified_locator && (
+                          <p className="text-[11px] font-mono text-muted-foreground mt-1">
+                            Verified Locator: <code className="bg-muted px-1.5 py-0.5 rounded text-foreground">{ctrl.verified_locator}</code>
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-xs font-mono text-muted-foreground">
+                        {ctrl.options?.length ?? 0} Discovered Option{ctrl.options?.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
+
+                    {/* Options List */}
+                    {ctrl.options && ctrl.options.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                          Discovered Control Options
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {ctrl.options.map((opt: any, oIdx: number) => (
+                            <span
+                              key={oIdx}
+                              className={`rounded-lg px-2.5 py-1 text-xs border ${
+                                opt.is_default_or_selected
+                                  ? 'border-primary bg-primary/10 text-primary font-bold'
+                                  : 'border-border bg-muted/30 text-muted-foreground'
+                              }`}
+                            >
+                              {opt.label}
+                              {opt.is_default_or_selected && ' (Default / Selected)'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Observed Transitions */}
+                    {ctrl.observed_transitions && ctrl.observed_transitions.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-border/50">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                          Observed State Transitions
+                        </p>
+                        <div className="space-y-2">
+                          {ctrl.observed_transitions.map((tr: any, tIdx: number) => (
+                            <div key={tIdx} className="rounded-lg border border-border bg-muted/20 p-3 space-y-1.5 text-xs">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="font-bold text-foreground">
+                                  Action: {tr.action_type} option &lsquo;{tr.option_selected}&rsquo;
+                                </span>
+                                <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                                  tr.status === 'OBSERVED'
+                                    ? 'bg-green-500/10 text-green-600'
+                                    : 'bg-amber-500/10 text-amber-600'
+                                }`}>
+                                  {tr.status}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] font-mono text-muted-foreground">
+                                <span>Initial Fingerprint: {tr.initial_state_fingerprint}</span>
+                                <span>&rarr;</span>
+                                <span className="text-primary font-bold">Resulting Fingerprint: {tr.resulting_state_fingerprint}</span>
+                              </div>
+                              {tr.visible_changes_observed && (
+                                <p className="text-xs text-foreground bg-background rounded p-2 border border-border/40">
+                                  {tr.visible_changes_observed}
+                                </p>
+                              )}
+                              {tr.newly_visible_elements_sample && tr.newly_visible_elements_sample.length > 0 && (
+                                <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                                  <span className="font-semibold">Sample Rendered Elements:</span>
+                                  <span>{tr.newly_visible_elements_sample.join(', ')}</span>
+                                </div>
+                              )}
+                              {tr.error && (
+                                <p className="text-xs text-destructive">Error: {tr.error}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {(!appModel?.interactive_controls || appModel.interactive_controls.length === 0) &&
+                  (!result.crawl_report?.interactive_controls || result.crawl_report.interactive_controls.length === 0) && (
+                    <div className="rounded-xl border border-border bg-muted/20 p-8 text-center text-sm text-muted-foreground">
+                      No interactive multi-state controls (dropdowns, tabs, or filter chips) were detected on the crawled pages.
+                    </div>
+                  )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

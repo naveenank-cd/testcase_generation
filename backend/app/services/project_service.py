@@ -19,6 +19,12 @@ class ProjectService:
         parsed = make_url(url)
         return {"host": parsed.host or "127.0.0.1", "port": parsed.port or 5432}
 
+    async def _safe_rollback(self) -> None:
+        try:
+            await self.session.rollback()
+        except Exception:
+            pass
+
     async def create(self, data):
         try:
             row = await self.repo.add(Project(**data))
@@ -26,16 +32,16 @@ class ProjectService:
             await self.session.refresh(row)
             return row
         except IntegrityError as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DuplicateEntity("A project with the supplied values already exists") from exc
         except (DBAPIError, OSError) as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to connect to the PostgreSQL database.",
                 details=self._database_details(),
             ) from exc
         except SQLAlchemyError as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to complete the PostgreSQL database operation.",
                 details=self._database_details(),
@@ -45,7 +51,7 @@ class ProjectService:
         try:
             return await self.repo.list_active()
         except (SQLAlchemyError, OSError) as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to connect to the PostgreSQL database.",
                 details=self._database_details(),
@@ -55,7 +61,7 @@ class ProjectService:
         try:
             row = await self.repo.get(entity_id)
         except (SQLAlchemyError, OSError) as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to connect to the PostgreSQL database.",
                 details=self._database_details(),
@@ -74,7 +80,7 @@ class ProjectService:
             await self.session.refresh(row)
             return row
         except SQLAlchemyError as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to complete the PostgreSQL database operation.",
                 details=self._database_details(),
@@ -86,7 +92,7 @@ class ProjectService:
             await self.repo.soft_delete(row)
             await self.session.commit()
         except SQLAlchemyError as exc:
-            await self.session.rollback()
+            await self._safe_rollback()
             raise DatabaseUnavailable(
                 "Unable to complete the PostgreSQL database operation.",
                 details=self._database_details(),

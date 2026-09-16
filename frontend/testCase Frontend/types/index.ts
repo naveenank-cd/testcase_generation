@@ -17,6 +17,8 @@ export interface TechStack {
   database: string;
   testing: string;
   other: string;
+}
+
 export interface DiscoveredPageInfo {
   url: string;
   route_path: string;
@@ -66,6 +68,84 @@ export interface DiscoveredFormInfo {
   submit_locator?: string | null;
 }
 
+export interface InteractiveOptionInfo {
+  label: string;
+  value?: string | null;
+  locator?: string | null;
+  is_default_or_selected: boolean;
+}
+
+export interface ObservedStateTransition {
+  action_type: string;
+  option_selected?: string | null;
+  initial_state_fingerprint?: string | null;
+  resulting_state_fingerprint?: string | null;
+  url_before: string;
+  url_after: string;
+  status: 'OBSERVED' | 'DISCOVERED' | 'INFERRED' | 'UNKNOWN' | 'REQUIRES_FURTHER_EXPLORATION';
+  visible_changes_observed?: string | null;
+  newly_visible_elements_count: number;
+  newly_visible_elements_sample: string[];
+  screenshot_path?: string | null;
+  error?: string | null;
+}
+
+export interface InteractiveControlSummary {
+  control_id: string;
+  page_url: string;
+  control_name: string;
+  control_type: string;
+  verified_locator?: string | null;
+  options: InteractiveOptionInfo[];
+  observed_transitions: ObservedStateTransition[];
+  exploration_status: 'OBSERVED' | 'DISCOVERED' | 'UNKNOWN' | 'REQUIRES_FURTHER_EXPLORATION';
+}
+
+export interface InteractiveStateObservation {
+  observation_id: string;
+  page_url: string;
+  control_name: string;
+  control_type: string;
+  action_type: string;
+  option_chosen?: string | null;
+  url_before: string;
+  url_after: string;
+  initial_state_fingerprint: string;
+  resulting_state_fingerprint: string;
+  newly_visible_elements: string[];
+  visible_text_delta?: string | null;
+  screenshot_path?: string | null;
+  status: 'OBSERVED' | 'DISCOVERED' | 'INFERRED' | 'UNKNOWN' | 'REQUIRES_FURTHER_EXPLORATION';
+  error?: string | null;
+  timestamp: string;
+}
+
+export interface ApplicationModuleInfo {
+  module_name: string;
+  page_urls: string[];
+  page_titles: string[];
+  summary?: string | null;
+}
+
+export interface ApplicationModel {
+  application_id: string;
+  application_url: string;
+  crawl_id?: string | null;
+  workflow_id?: string | null;
+  modules: ApplicationModuleInfo[];
+  pages: DiscoveredPageInfo[];
+  elements: DiscoveredElement[];
+  interactive_controls: InteractiveControlSummary[];
+  observations: InteractiveStateObservation[];
+  flow?: ApplicationFlow | null;
+  navigation_graph: NavigationPathInfo[];
+  confirmed_states: Record<string, any>[];
+  unknown_or_unexplored: Record<string, any>[];
+  verified_locators: Record<string, string>;
+  summary: Record<string, any>;
+  created_at?: string;
+}
+
 export interface ApplicationKnowledge {
   application_url: string;
   crawl_id?: string | null;
@@ -77,6 +157,8 @@ export interface ApplicationKnowledge {
   actions: DiscoveredActionInfo[];
   navigation_paths: NavigationPathInfo[];
   forms: DiscoveredFormInfo[];
+  interactive_controls?: InteractiveControlSummary[];
+  interactive_observations?: InteractiveStateObservation[];
   verified_locators: Record<string, string>;
   summary: {
     total_pages: number;
@@ -84,6 +166,8 @@ export interface ApplicationKnowledge {
     total_actions: number;
     total_navigation_paths: number;
     total_forms: number;
+    total_interactive_controls?: number;
+    total_interactive_observations?: number;
     crawl_status: string;
     application_url: string;
   };
@@ -404,6 +488,10 @@ export interface CrawlReport {
     elapsed_seconds: number;
     estimated_completion_seconds?: number | null;
   };
+  interactive_states_explored?: number;
+  interactive_controls?: InteractiveControlSummary[];
+  interactive_observations?: InteractiveStateObservation[];
+  page_inventory?: Array<Record<string, unknown>>;
 }
 
 export interface CrawlAnalysis {
@@ -842,7 +930,12 @@ export interface CrawlJob {
     current_crawl_depth?: number;
     elapsed_seconds?: number;
     estimated_completion_seconds?: number | null;
+    current_url?: string;
+    elements_found?: number;
+    interactive_states_explored?: number;
+    interactive_controls_found?: number;
   };
   result: CrawlGenerationResponse | null;
   error: string | null;
 }
+

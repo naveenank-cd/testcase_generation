@@ -28,7 +28,19 @@ export const EMPTY_PAYLOAD: ManualInputPayload = {
   tech_stack: { frontend: '', backend: '', database: '', testing: '', other: '' },
 };
 
-export const FIELD_LABELS: Record<Exclude<keyof ManualInputPayload, 'tech_stack'>, string> = {
+export type RequirementFieldKey =
+  | 'user_stories'
+  | 'acceptance_criteria'
+  | 'functional_requirements'
+  | 'non_functional_requirements'
+  | 'epics'
+  | 'features'
+  | 'business_rules'
+  | 'dependencies'
+  | 'constraints'
+  | 'image_ids';
+
+export const FIELD_LABELS: Record<RequirementFieldKey, string> = {
   user_stories: 'User stories',
   acceptance_criteria: 'Acceptance criteria',
   functional_requirements: 'Functional requirements',
@@ -40,3 +52,4 @@ export const FIELD_LABELS: Record<Exclude<keyof ManualInputPayload, 'tech_stack'
   constraints: 'Constraints',
   image_ids: 'Reference images',
 };
+
