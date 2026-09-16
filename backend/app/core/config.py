@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     groq_validation_model: str = ""
     groq_regeneration_model: str = ""
     groq_max_concurrent_requests: int = 1
-    groq_max_output_tokens: int = 6000
+    groq_max_output_tokens: int = 8000
     # The 120B on-demand tier is limited to 8K TPM. Thirty seconds avoids
     # retry storms while remaining substantially faster than the old 55s gap.
     groq_min_request_interval_seconds: float = 30.0
@@ -81,11 +81,11 @@ class Settings(BaseSettings):
     cerebras_regeneration_model: str = ""
     llm_request_timeout_seconds: float = 180.0
     llm_temperature: float = 0.2
-    llm_max_output_tokens: int = 6000
-    llm_generation_max_output_tokens: int = 2500
-    llm_validation_max_output_tokens: int = 2000
-    llm_regeneration_max_output_tokens: int = 3000
-    llm_structured_output_repair_enabled: bool = False
+    llm_max_output_tokens: int = 8000
+    llm_generation_max_output_tokens: int = 6000
+    llm_validation_max_output_tokens: int = 4000
+    llm_regeneration_max_output_tokens: int = 6000
+    llm_structured_output_repair_enabled: bool = True
     llm_scenario_batch_size: int = 5
     llm_testcase_batch_size: int = 4
     validation_pass_threshold: float = 0.95
